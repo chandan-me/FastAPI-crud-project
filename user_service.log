@@ -1,9 +1,0 @@
-INFO:     Started server process [17944]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:8011 (Press CTRL+C to quit)
-[USER-SERVICE] Successfully registered with Discovery Server (ID: Chandan:USER-SERVICE:8011:4004db)
-INFO:     127.0.0.1:60014 - "GET /users/ HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59541 - "GET /users/ HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57881 - "GET /users/5 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49423 - "GET /users/5 HTTP/1.1" 200 OK
