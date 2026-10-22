@@ -1,6 +1,21 @@
-INFO:     Started server process [8660]
+INFO:     Started server process [7884]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8010): only one usage of each socket address (protocol/network address/port) is normally permitted
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
+INFO:     Uvicorn running on http://127.0.0.1:8010 (Press CTRL+C to quit)
+INFO:     127.0.0.1:57490 - "GET /products HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57490 - "GET /products HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60011 - "POST /auth/login HTTP/1.1" 401 Unauthorized
+Creating JWT token with payload: {'user_id': 5, 'email': 'chandan@gmail.com', 'exp': datetime.datetime(2026, 10, 23, 5, 59, 45, 495449, tzinfo=datetime.timezone.utc)}
+Encoded JWT token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo1LCJlbWFpbCI6ImNoYW5kYW5AZ21haWwuY29tIiwiZXhwIjoxNzkyNzM1MTg1fQ.YbfwU-aCJFJ5hZDnHJnD2AeAnf0GWxdQ36NM7MWAyRY
+INFO:     127.0.0.1:59536 - "POST /auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59536 - "OPTIONS /orders?user_id=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59536 - "GET /orders?user_id=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60574 - "GET /orders?user_id=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63834 - "GET /products HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60574 - "GET /orders?user_id=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63834 - "GET /products HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65020 - "OPTIONS /orders HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65020 - "POST /orders HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:57878 - "POST /orders HTTP/1.1" 201 Created
+INFO:     127.0.0.1:57878 - "GET /products HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57878 - "GET /orders?user_id=5 HTTP/1.1" 200 OK

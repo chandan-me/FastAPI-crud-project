@@ -90,7 +90,7 @@ async def run_tests():
             if res.status_code == 201:
                 order = res.json()
                 order_id = order["id"]
-                print_result("Gateway Routing: Place Order (JWT)", True, f"Order ID: {order_id}, Total: ${order['total_price']}")
+                print_result("Gateway Routing: Place Order (JWT)", True, f"Order ID: {order_id}, Total: ₹{order['total_price']}")
             else:
                 print_result("Gateway Routing: Place Order (JWT)", False, f"Status: {res.status_code}, Body: {res.text}")
         except Exception as e:

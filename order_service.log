@@ -1,5 +1,11 @@
-INFO:     Started server process [19076]
+INFO:     Started server process [14892]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-ERROR:    [Errno 10048] error while attempting to bind on address ('127.0.0.1', 8013): only one usage of each socket address (protocol/network address/port) is normally permitted
-INFO:     Waiting for application shutdown.
+INFO:     Uvicorn running on http://127.0.0.1:8013 (Press CTRL+C to quit)
+[ORDER-SERVICE] Successfully registered with Discovery Server (ID: Chandan:ORDER-SERVICE:8013:477aca)
+INFO:     127.0.0.1:59544 - "GET /orders?user_id=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60581 - "GET /orders?user_id=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60582 - "GET /orders?user_id=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57879 - "POST /orders HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:49421 - "POST /orders HTTP/1.1" 201 Created
+INFO:     127.0.0.1:49427 - "GET /orders?user_id=5 HTTP/1.1" 200 OK

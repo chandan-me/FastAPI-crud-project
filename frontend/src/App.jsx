@@ -242,7 +242,7 @@ function App() {
       }
 
       setSuccess(
-        `Order #${data.id} placed successfully! Total cost: $${data.total_price}`,
+        `Order #${data.id} placed successfully! Total cost: ₹${data.total_price}`,
       );
 
       // Await database updates before resetting the loading state
@@ -477,7 +477,7 @@ function App() {
                       <div>
                         <strong>Order #{ord.id}</strong>
                         <div style={{ fontSize: "0.8rem", opacity: 0.6 }}>
-                          Total: ${ord.total_price}
+                          Total: ₹{ord.total_price}
                         </div>
                       </div>
                       <span className="status-badge completed">
@@ -514,7 +514,7 @@ function App() {
                     <span style={{ color: "#35a29f", fontWeight: "bold" }}>
                       Total Cost:
                     </span>{" "}
-                    ${detailedOrder.total_price}
+                    ₹{detailedOrder.total_price}
                   </div>
 
                   <hr
@@ -554,7 +554,7 @@ function App() {
                         style={{ paddingLeft: "0.5rem", marginTop: "0.25rem" }}
                       >
                         Product: {detailedOrder.product_details.name} <br />
-                        Catalog Price: ${detailedOrder.product_details.price}
+                        Catalog Price: ₹{detailedOrder.product_details.price}
                       </div>
                     </div>
                   ) : (
