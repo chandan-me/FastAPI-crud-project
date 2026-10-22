@@ -605,23 +605,25 @@ function App() {
               <div
                 style={{
                   marginTop: "1.25rem",
-                  padding: "0.75rem",
-                  background: "rgba(255,255,255,0.05)",
-                  borderRadius: "6px",
-                  fontSize: "0.8rem",
-                  lineHeight: "1.4",
+                  padding: "0.85rem",
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "8px",
+                  fontSize: "0.82rem",
+                  lineHeight: "1.5",
+                  color: "#334155",
                 }}
               >
-                <div style={{ fontWeight: "bold", color: "#35a29f", marginBottom: "0.25rem" }}>
+                <div style={{ fontWeight: "700", color: "#0d9488", marginBottom: "0.35rem" }}>
                   🔑 Quick Demo Accounts:
                 </div>
                 <div>• <strong>Admin:</strong> <code>alice@gmail.com</code> (Full Product CRUD)</div>
                 <div>• <strong>Customer:</strong> <code>bob@gmail.com</code> (Purchase Only)</div>
               </div>
 
-              <p style={{ textAlign: "center", marginTop: "1rem", fontSize: "0.85rem" }}>
+              <p style={{ textAlign: "center", marginTop: "1rem", fontSize: "0.85rem", color: "#64748b" }}>
                 Don't have an account?{" "}
-                <a href="#" onClick={() => setIsRegisterMode(true)} style={{ color: "#35a29f" }}>
+                <a href="#" onClick={() => setIsRegisterMode(true)} style={{ color: "#0d9488", fontWeight: "600" }}>
                   Register here
                 </a>
               </p>
@@ -659,9 +661,9 @@ function App() {
               <button type="submit" style={{ width: "100%" }}>
                 Sign Up
               </button>
-              <p style={{ textAlign: "center", marginTop: "1rem", fontSize: "0.85rem" }}>
+              <p style={{ textAlign: "center", marginTop: "1rem", fontSize: "0.85rem", color: "#64748b" }}>
                 Already registered?{" "}
-                <a href="#" onClick={() => setIsRegisterMode(false)} style={{ color: "#35a29f" }}>
+                <a href="#" onClick={() => setIsRegisterMode(false)} style={{ color: "#0d9488", fontWeight: "600" }}>
                   Login here
                 </a>
               </p>
@@ -683,7 +685,7 @@ function App() {
                 {/* Admin-only: Add Product Button */}
                 {isAdmin && (
                   <button className="sm" onClick={openAddProductModal}>
-                    ➕ Add Product
+                    ➕ Add New Product
                   </button>
                 )}
               </div>
@@ -706,19 +708,19 @@ function App() {
               </form>
 
               {products.length === 0 ? (
-                <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.9rem" }}>No products found.</p>
+                <p style={{ color: "#64748b", fontSize: "0.9rem" }}>No products found.</p>
               ) : (
                 <ul className="item-list">
                   {products.map((prod) => (
                     <li key={prod.id}>
                       <div>
-                        <strong>{prod.name}</strong>
-                        <div style={{ fontSize: "0.85rem", color: "#35a29f" }}>Unit Price: ₹{prod.price}</div>
+                        <strong style={{ color: "#0f172a" }}>{prod.name}</strong>
+                        <div style={{ fontSize: "0.85rem", color: "#0d9488", fontWeight: "600" }}>Unit Price: ₹{prod.price}</div>
                         <div>
                           {prod.stock > 0 ? (
-                            <span style={{ color: "#4cd137", fontSize: "0.85rem" }}>In Stock: {prod.stock}</span>
+                            <span style={{ color: "#16a34a", fontSize: "0.85rem", fontWeight: "600" }}>In Stock: {prod.stock}</span>
                           ) : (
-                            <span style={{ color: "#ff7675", fontSize: "0.85rem" }}>Out of Stock</span>
+                            <span style={{ color: "#dc2626", fontSize: "0.85rem", fontWeight: "600" }}>Out of Stock</span>
                           )}
                         </div>
                       </div>
@@ -791,7 +793,7 @@ function App() {
                 📜 {isAdmin ? "All Platform Orders (Admin View)" : "My Order History (Customer View)"}
               </h3>
               {orders.length === 0 ? (
-                <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "0.9rem" }}>No orders placed yet.</p>
+                <p style={{ color: "#64748b", fontSize: "0.9rem" }}>No orders placed yet.</p>
               ) : (
                 <ul className="item-list">
                   {orders.map((ord) => {
@@ -814,8 +816,8 @@ function App() {
                           onClick={() => fetchOrderDetails(ord.id)}
                         >
                           <div>
-                            <strong>Order #{ord.id}</strong> (User #{ord.user_id} | Product #{ord.product_id})
-                            <div style={{ fontSize: "0.8rem", opacity: 0.7 }}>
+                            <strong style={{ color: "#0f172a" }}>Order #{ord.id}</strong> (User #{ord.user_id} | Product #{ord.product_id})
+                            <div style={{ fontSize: "0.8rem", color: "#64748b" }}>
                               Qty: {ord.quantity} | Total: ₹{ord.total_price}
                             </div>
                           </div>
@@ -825,7 +827,7 @@ function App() {
                           {ord.status?.toUpperCase() !== "CANCELLED" && (
                             <button
                               className="secondary sm"
-                              style={{ borderColor: "#fbc531", color: "#fbc531" }}
+                              style={{ borderColor: "#fde68a", color: "#b45309", background: "#fef3c7" }}
                               onClick={() => handleCancelOrder(ord.id)}
                             >
                               Cancel
@@ -849,16 +851,16 @@ function App() {
 
             {/* Aggregated Federated Details Card */}
             {detailedOrder && (
-              <div className="card" style={{ borderColor: "#35a29f" }}>
+              <div className="card" style={{ borderColor: "#0d9488", boxShadow: "0 10px 25px -5px rgba(13, 148, 136, 0.15)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <h3 style={{ margin: 0 }}>🔍 Order #{detailedOrder.id} Details</h3>
+                  <h3 style={{ margin: 0, color: "#0f172a" }}>🔍 Order #{detailedOrder.id} Details</h3>
                   <button className="secondary sm" onClick={() => setDetailedOrder(null)}>
                     ✕ Close
                   </button>
                 </div>
                 <div style={{ fontSize: "0.9rem", display: "grid", gap: "0.5rem", marginTop: "1rem" }}>
                   <div>
-                    <span style={{ color: "#35a29f", fontWeight: "bold" }}>Status:</span>{" "}
+                    <span style={{ color: "#0d9488", fontWeight: "bold" }}>Status:</span>{" "}
                     <span
                       className={`status-badge ${
                         detailedOrder.status?.toLowerCase() === "cancelled"
@@ -872,40 +874,40 @@ function App() {
                     </span>
                   </div>
                   <div>
-                    <span style={{ color: "#35a29f", fontWeight: "bold" }}>Quantity Ordered:</span>{" "}
+                    <span style={{ color: "#0d9488", fontWeight: "bold" }}>Quantity Ordered:</span>{" "}
                     {detailedOrder.quantity}
                   </div>
                   <div>
-                    <span style={{ color: "#35a29f", fontWeight: "bold" }}>Total Cost:</span> ₹
+                    <span style={{ color: "#0d9488", fontWeight: "bold" }}>Total Cost:</span> ₹
                     {detailedOrder.total_price}
                   </div>
 
-                  <hr style={{ border: "none", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "0.5rem 0" }} />
+                  <hr style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: "0.5rem 0" }} />
 
                   {/* Customer Details */}
                   {detailedOrder.user_details ? (
                     <div>
-                      <strong style={{ color: "#ffffff" }}>👤 Customer Profile Details:</strong>
-                      <div style={{ paddingLeft: "0.5rem", marginTop: "0.25rem" }}>
+                      <strong style={{ color: "#0f172a" }}>👤 Customer Profile Details:</strong>
+                      <div style={{ paddingLeft: "0.5rem", marginTop: "0.25rem", color: "#334155" }}>
                         Name: {detailedOrder.user_details.name} <br />
                         Email: {detailedOrder.user_details.email}
                       </div>
                     </div>
                   ) : (
-                    <div style={{ color: "#ff7675" }}>Failed to retrieve customer profiles.</div>
+                    <div style={{ color: "#dc2626" }}>Failed to retrieve customer profiles.</div>
                   )}
 
                   {/* Product Details */}
                   {detailedOrder.product_details ? (
                     <div style={{ marginTop: "0.5rem" }}>
-                      <strong style={{ color: "#ffffff" }}>📦 Product Catalog Details:</strong>
-                      <div style={{ paddingLeft: "0.5rem", marginTop: "0.25rem" }}>
+                      <strong style={{ color: "#0f172a" }}>📦 Product Catalog Details:</strong>
+                      <div style={{ paddingLeft: "0.5rem", marginTop: "0.25rem", color: "#334155" }}>
                         Product: {detailedOrder.product_details.name} <br />
                         Catalog Price: ₹{detailedOrder.product_details.price}
                       </div>
                     </div>
                   ) : (
-                    <div style={{ color: "#ff7675" }}>Failed to retrieve product details.</div>
+                    <div style={{ color: "#dc2626" }}>Failed to retrieve product details.</div>
                   )}
                 </div>
               </div>
@@ -1074,7 +1076,7 @@ function App() {
                 ✕ Close
               </button>
             </div>
-            <p style={{ color: "rgba(255,255,255,0.6)", fontSize: "0.85rem", marginTop: "0.5rem" }}>
+            <p style={{ color: "#64748b", fontSize: "0.85rem", marginTop: "0.5rem" }}>
               Live accounts stored in MySQL <code>users_db.users</code> table showing assigned roles.
             </p>
             <div style={{ overflowX: "auto", maxHeight: "400px" }}>

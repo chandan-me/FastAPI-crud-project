@@ -37,6 +37,17 @@ def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(database.g
     """
     return user_service.get_users(db, skip=skip, limit=limit)
 
+@router.get("/by-email", response_model=schemas.User)
+def read_user_by_email(email: str, db: Session = Depends(database.get_db)):
+    """
+    Endpoint to retrieve details of a specific user by email.
+    Provides direct, O(1) indexed lookup for Gateway authentication.
+    """
+    db_user = user_service.get_user_by_email(db, email=email.strip())
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return db_user
+
 @router.get("/{user_id}", response_model=schemas.User)
 def read_user(user_id: int, db: Session = Depends(database.get_db)):
     """

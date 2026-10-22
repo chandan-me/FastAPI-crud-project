@@ -9,6 +9,15 @@ import os
 # It captures logs to separate files and monitors startup diagnostic checks.
 # =====================================================================
 
+def free_ports(ports):
+    """Kills any orphaned processes on the target ports to avoid [Errno 10048]."""
+    for port in ports:
+        try:
+            cmd = f'powershell -Command "Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}"'
+            subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
 def main():
     processes = []
     log_files = []
@@ -17,6 +26,11 @@ def main():
         print("STARTING DISCOVERY SERVICE & MICROSERVICES WORKSPACE")
         print("=" * 60)
         
+        # Proactively free any ports that may have remained open from a previous run
+        print("[System] Checking and freeing ports (8762, 8011, 8012, 8013, 8010, 5173)...")
+        free_ports([8762, 8011, 8012, 8013, 8010, 5173])
+        time.sleep(1)
+
         # Open write streams for each component's log files
         discovery_log = open("discovery_service.log", "w", encoding="utf-8")
         user_log = open("user_service.log", "w", encoding="utf-8")
@@ -126,7 +140,11 @@ def main():
         print("[System] All components stopped.")
     finally:
         for f in log_files:
-            f.close()
+            try:
+                f.close()
+            except Exception:
+                pass
+        free_ports([8762, 8011, 8012, 8013, 8010, 5173])
 
 if __name__ == "__main__":
     main()

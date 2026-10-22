@@ -126,16 +126,13 @@ async def login(payload: LoginRequest):
         try:
             # Query User Service dynamically using Service Discovery
             user_host = await resolve_service_url("users")
-            res = await client.get(f"{user_host}/users/")
-            if res.status_code != 200:
+            res = await client.get(f"{user_host}/users/by-email", params={"email": payload.email.strip()})
+            if res.status_code == 404:
+                raise HTTPException(status_code=401, detail="Email address not registered")
+            elif res.status_code != 200:
                 raise HTTPException(status_code=500, detail="User Service database connection failed")
             
-            users = res.json()
-            user = next((u for u in users if u["email"].lower() == payload.email.lower()), None)
-            
-            if not user:
-                raise HTTPException(status_code=401, detail="Email address not registered")
-            
+            user = res.json()
             user_role = user.get("role", "customer")
             token = auth.create_access_token(data={"user_id": user["id"], "email": user["email"], "role": user_role})
             return {"access_token": token, "token_type": "bearer", "user": user}
