@@ -217,8 +217,14 @@ async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str
                 body_json = json.loads(body)
                 body_json["user_id"] = user_payload["user_id"]
                 body = json.dumps(body_json).encode("utf-8")
+                headers.pop("content-length", None)
             except Exception:
                 raise HTTPException(status_code=400, detail="Invalid JSON request body")
+
+        # Secure Isolation: For GET /orders list, scope query by the authenticated user's ID
+        if service_prefix == "orders" and method == "GET" and (path == "" or path == "/"):
+            query_params = dict(query_params)
+            query_params["user_id"] = str(user_payload["user_id"])
 
     # 5. Proxy/Forward the request to the correct microservice using HTTPX Client
     async with httpx.AsyncClient() as client:

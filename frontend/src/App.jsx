@@ -38,8 +38,9 @@ function App() {
     // If the token is stored, reload user session from localStorage
     const savedUser = localStorage.getItem("user");
     if (savedUser && token) {
-      setUser(JSON.parse(savedUser));
-      fetchOrders(token);
+      const parsedUser = JSON.parse(savedUser);
+      setUser(parsedUser);
+      fetchOrders(token, parsedUser.id);
     }
   }, []);
 
@@ -67,15 +68,20 @@ function App() {
     }
   };
 
-  // Fetch placed orders history (Protected Route - Requires JWT)
-  const fetchOrders = async (authToken) => {
+  // Fetch placed orders history (Protected Route - Requires JWT & scoped to current user)
+  const fetchOrders = async (authToken, currentUserId) => {
     try {
-      const res = await fetch(`${GATEWAY_URL}/orders`, {
+      const uid = currentUserId || user?.id;
+      const url = uid ? `${GATEWAY_URL}/orders?user_id=${uid}` : `${GATEWAY_URL}/orders`;
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${authToken}` },
       });
       if (res.ok) {
         const data = await res.json();
         setOrders(data);
+      } else if (res.status === 401) {
+        const data = await res.json().catch(() => ({}));
+        handleSessionExpired(data.detail || "Access token is invalid or expired. Please log in again.");
       }
     } catch (err) {
       setError("Order Service is offline.");
@@ -93,7 +99,12 @@ function App() {
         const data = await res.json();
         setDetailedOrder(data);
       } else {
-        setError("Failed to fetch detailed order information.");
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 401) {
+          handleSessionExpired(data.detail || "Access token is invalid or expired. Please log in again.");
+        } else {
+          setError(data.detail || "Failed to fetch detailed order information.");
+        }
       }
     } catch (err) {
       setError("Connection to Order Service lost.");
@@ -132,7 +143,7 @@ function App() {
       setSuccess(`Logged in successfully as ${data.user.name}!`);
 
       // Load historical orders list
-      fetchOrders(data.access_token);
+      fetchOrders(data.access_token, data.user.id);
     } catch (err) {
       setError("API Gateway is offline.");
     }
@@ -164,10 +175,22 @@ function App() {
       setUser(data.user);
       setSuccess(`Account registered successfully as ${data.user.name}!`);
       setIsRegisterMode(false);
-      fetchOrders(data.access_token);
+      fetchOrders(data.access_token, data.user.id);
     } catch (err) {
       setError("API Gateway registration failed.");
     }
+  };
+
+  // Clear expired/invalid session
+  const handleSessionExpired = (message = "Access token is invalid or expired. Please log in again.") => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setToken("");
+    setUser(null);
+    setOrders([]);
+    setDetailedOrder(null);
+    setError(message);
+    setSuccess("");
   };
 
   // Logout session
@@ -178,6 +201,7 @@ function App() {
     setUser(null);
     setOrders([]);
     setDetailedOrder(null);
+    setError("");
     setSuccess("Logged out successfully.");
   };
 
@@ -208,7 +232,11 @@ function App() {
 
       const data = await res.json();
       if (!res.ok) {
-        setError(data.detail || "Failed to place order.");
+        if (res.status === 401) {
+          handleSessionExpired(data.detail || "Access token is invalid or expired. Please log in again.");
+        } else {
+          setError(data.detail || "Failed to place order.");
+        }
         setIsPurchasing(false);
         return;
       }
@@ -219,7 +247,7 @@ function App() {
 
       // Await database updates before resetting the loading state
       await fetchProducts();
-      await fetchOrders(token);
+      await fetchOrders(token, user.id);
     } catch (err) {
       setError("Transaction gateway offline.");
     } finally {

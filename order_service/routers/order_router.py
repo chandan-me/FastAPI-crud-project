@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from .. import schemas, database
 from ..services import order_service
 
@@ -14,6 +14,7 @@ from ..services import order_service
 # Initialize the router with a prefix so all endpoints start with '/orders'
 router = APIRouter(prefix="/orders", tags=["orders"])
 
+@router.post("", response_model=schemas.Order, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 @router.post("/", response_model=schemas.Order, status_code=status.HTTP_201_CREATED)
 async def create_order(order: schemas.OrderCreate, db: Session = Depends(database.get_db)):
     """
@@ -22,12 +23,13 @@ async def create_order(order: schemas.OrderCreate, db: Session = Depends(databas
     """
     return await order_service.create_order(db=db, order=order)
 
+@router.get("", response_model=List[schemas.Order], include_in_schema=False)
 @router.get("/", response_model=List[schemas.Order])
-def read_orders(skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
+def read_orders(user_id: Optional[int] = None, skip: int = 0, limit: int = 100, db: Session = Depends(database.get_db)):
     """
-    Endpoint to list base orders.
+    Endpoint to list base orders, optionally filtered by user_id.
     """
-    return order_service.get_orders(db, skip=skip, limit=limit)
+    return order_service.get_orders(db, user_id=user_id, skip=skip, limit=limit)
 
 @router.get("/{order_id}", response_model=schemas.Order)
 def read_order(order_id: int, db: Session = Depends(database.get_db)):

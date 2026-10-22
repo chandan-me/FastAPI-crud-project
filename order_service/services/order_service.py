@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 import httpx
 from fastapi import HTTPException
+from typing import Optional
 from .. import models, schemas
 
 # =====================================================================
@@ -19,11 +20,15 @@ def get_order_by_id(db: Session, order_id: int):
     """
     return db.query(models.Order).filter(models.Order.id == order_id).first()
 
-def get_orders(db: Session, skip: int = 0, limit: int = 100):
+def get_orders(db: Session, user_id: Optional[int] = None, skip: int = 0, limit: int = 100):
     """
     Returns a list of orders supporting pagination (offset/limit).
+    If user_id is provided, filters orders by user_id.
     """
-    return db.query(models.Order).offset(skip).limit(limit).all()
+    query = db.query(models.Order)
+    if user_id is not None:
+        query = query.filter(models.Order.user_id == user_id)
+    return query.offset(skip).limit(limit).all()
 
 async def create_order(db: Session, order: schemas.OrderCreate):
     """
