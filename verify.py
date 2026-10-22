@@ -2,6 +2,9 @@ import httpx
 import sys
 import time
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 # =====================================================================
 # INTEGRATION TESTING & GATEWAY VERIFICATION SCRIPT
 # This script sends HTTP requests to the API Gateway (Port 8000) to 

@@ -19,3 +19,6 @@ class User(Base):
     
     # Email: Must be unique, indexed for quick lookups, required
     email = Column(String(255), unique=True, index=True, nullable=False)
+    
+    # Role: 'admin' or 'customer' (default: 'customer')
+    role = Column(String(50), default="customer", nullable=False)

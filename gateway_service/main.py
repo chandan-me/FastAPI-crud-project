@@ -113,6 +113,7 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     name: str
     email: str
+    role: str = "customer"
 
 # ---------------------------------------------------------------------
 # 1. GATEWAY AUTHENTICATION ENDPOINTS (Local Gateway Auth Handling)
@@ -135,7 +136,8 @@ async def login(payload: LoginRequest):
             if not user:
                 raise HTTPException(status_code=401, detail="Email address not registered")
             
-            token = auth.create_access_token(data={"user_id": user["id"], "email": user["email"]})
+            user_role = user.get("role", "customer")
+            token = auth.create_access_token(data={"user_id": user["id"], "email": user["email"], "role": user_role})
             return {"access_token": token, "token_type": "bearer", "user": user}
         except httpx.RequestError:
             raise HTTPException(status_code=503, detail="User Service is offline")
@@ -154,7 +156,8 @@ async def register(payload: RegisterRequest):
                 raise HTTPException(status_code=500, detail="User registration failed")
             
             user = res.json()
-            token = auth.create_access_token(data={"user_id": user["id"], "email": user["email"]})
+            user_role = user.get("role", "customer")
+            token = auth.create_access_token(data={"user_id": user["id"], "email": user["email"], "role": user_role})
             return {"access_token": token, "token_type": "bearer", "user": user}
         except httpx.RequestError:
             raise HTTPException(status_code=503, detail="User Service is offline")
@@ -171,6 +174,7 @@ async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str
     - Resolves downstream service URL dynamically using Discovery Server.
     - Inspects prefix and path against PUBLIC_ROUTES whitelist.
     - Enforces JWT validation if the route is protected.
+    - Applies Role-Based Access Control (RBAC): Admin vs Customer.
     - Forwards request content downstream, returning response back to client.
     """
     # 1. Resolve microservice address dynamically from Discovery Registry
@@ -195,6 +199,7 @@ async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str
             break
 
     # 4. Enforce Token Security on Protected Routes
+    user_payload = {}
     if not is_public_route:
         auth_header = headers.get("authorization", "")
         if not auth_header.startswith("Bearer "):
@@ -210,8 +215,19 @@ async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str
                 status_code=status.HTTP_401_UNAUTHORIZED, 
                 detail="Access token is invalid or expired"
             )
-            
-        # Secure Ingestion: If creating order, inject user_id from token to prevent spoofing
+
+        user_role = (user_payload.get("role") or "customer").lower()
+
+        # 4.1 RBAC Enforcement for Product Management:
+        # ONLY Admin can Create, Update, or Delete products (Customers can only view and purchase)
+        if service_prefix == "products" and method in ("POST", "PUT", "DELETE"):
+            if user_role != "admin":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: Admin role required to create, modify, or delete products"
+                )
+
+        # 4.2 Secure Ingestion: If creating order, inject user_id from token to prevent spoofing
         if service_prefix == "orders" and method == "POST" and body:
             try:
                 body_json = json.loads(body)
@@ -221,13 +237,42 @@ async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str
             except Exception:
                 raise HTTPException(status_code=400, detail="Invalid JSON request body")
 
-        # Secure Isolation: For GET /orders list, scope query by the authenticated user's ID
+        # 4.3 Secure Isolation: Customers can only view their own orders; Admins can view all orders
         if service_prefix == "orders" and method == "GET" and (path == "" or path == "/"):
-            query_params = dict(query_params)
-            query_params["user_id"] = str(user_payload["user_id"])
+            if user_role != "admin":
+                query_params = dict(query_params)
+                query_params["user_id"] = str(user_payload["user_id"])
+
+        # 4.4 Secure Authorization: Users can only modify or delete their own profile (unless admin)
+        if service_prefix == "users" and method in ("PUT", "DELETE"):
+            clean_path = path.strip("/")
+            if clean_path.isdigit():
+                if user_role != "admin" and int(clean_path) != user_payload["user_id"]:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="You are not authorized to modify or delete another user's profile"
+                    )
 
     # 5. Proxy/Forward the request to the correct microservice using HTTPX Client
     async with httpx.AsyncClient() as client:
+        # Check order ownership for PUT / DELETE on orders (Admins can manage any; Customers only their own)
+        if not is_public_route and service_prefix == "orders" and method in ("PUT", "DELETE"):
+            user_role = (user_payload.get("role") or "customer").lower()
+            if user_role != "admin":
+                clean_path = path.strip("/")
+                if clean_path.isdigit():
+                    try:
+                        chk = await client.get(f"{target_host}/orders/{clean_path}")
+                        if chk.status_code == 200:
+                            order_info = chk.json()
+                            if order_info.get("user_id") != user_payload["user_id"]:
+                                raise HTTPException(
+                                    status_code=status.HTTP_403_FORBIDDEN,
+                                    detail="You are not authorized to modify or delete another user's order"
+                                )
+                    except httpx.RequestError:
+                        pass
+
         try:
             response = await client.request(
                 method=method,

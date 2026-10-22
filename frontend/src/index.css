@@ -138,6 +138,29 @@ button.secondary:hover {
   border-bottom: none;
 }
 
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.data-table th, .data-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.9rem;
+}
+
+.data-table th {
+  color: #35a29f;
+  font-weight: 600;
+  border-bottom: 2px solid rgba(53, 162, 159, 0.3);
+}
+
+.data-table tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .status-badge {
   padding: 0.25rem 0.65rem;
   border-radius: 20px;
@@ -156,6 +179,97 @@ button.secondary:hover {
   background-color: rgba(225, 177, 44, 0.2);
   color: #fbc531;
   border: 1px solid #fbc531;
+}
+
+.status-badge.cancelled {
+  background-color: rgba(232, 65, 24, 0.2);
+  color: #ff7675;
+  border: 1px solid #ff7675;
+}
+
+/* Role Badges */
+.role-badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-left: 0.5rem;
+}
+
+.role-badge.admin {
+  background: rgba(243, 156, 18, 0.2);
+  color: #f39c12;
+  border: 1px solid #f39c12;
+}
+
+.role-badge.customer {
+  background: rgba(53, 162, 159, 0.2);
+  color: #35a29f;
+  border: 1px solid #35a29f;
+}
+
+/* Modal Overlay & Dialog */
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #1c2541;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 2rem;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* Action Buttons & Utilities */
+button.sm {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.8rem;
+}
+
+button.danger {
+  background-color: #d63031;
+}
+
+button.danger:hover {
+  background-color: #b71540;
+}
+
+button.secondary-danger {
+  background-color: transparent;
+  border: 1px solid #ff7675;
+  color: #ff7675;
+}
+
+button.secondary-danger:hover {
+  background-color: rgba(255, 118, 117, 0.15);
+}
+
+.action-btn-group {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.search-container {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
 }
 
 /* Header Info */

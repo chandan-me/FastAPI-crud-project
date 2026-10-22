@@ -159,3 +159,51 @@ async def get_order_details(db: Session, order_id: int):
         "user_details": user_details,
         "product_details": product_details
     }
+
+async def update_order(db: Session, db_order: models.Order, order_update: schemas.OrderUpdate):
+    """
+    Updates an order's status (e.g. CANCELLED, PENDING, COMPLETED).
+    If status transitions to 'CANCELLED' from an active status, automatically
+    restores product inventory in Product Service.
+    """
+    if order_update.status is not None:
+        new_status = order_update.status.upper()
+        old_status = (db_order.status or "").upper()
+        
+        if new_status == "CANCELLED" and old_status != "CANCELLED":
+            # Attempt stock restoration
+            async with httpx.AsyncClient() as client:
+                try:
+                    res = await client.put(
+                        f"{PRODUCT_SERVICE_URL}/products/{db_order.product_id}/restore-stock",
+                        json={"quantity": db_order.quantity}
+                    )
+                    if res.status_code not in (200, 404):
+                        raise HTTPException(status_code=500, detail="Failed to restore inventory in Product Service.")
+                except httpx.RequestError:
+                    raise HTTPException(status_code=503, detail="Product Service unavailable for stock restoration.")
+                    
+        db_order.status = new_status
+
+    db.commit()
+    db.refresh(db_order)
+    return db_order
+
+async def delete_order(db: Session, db_order: models.Order):
+    """
+    Safely deletes an order. If the order was active (not CANCELLED),
+    restores product inventory in Product Service before deletion.
+    """
+    if (db_order.status or "").upper() != "CANCELLED":
+        async with httpx.AsyncClient() as client:
+            try:
+                await client.put(
+                    f"{PRODUCT_SERVICE_URL}/products/{db_order.product_id}/restore-stock",
+                    json={"quantity": db_order.quantity}
+                )
+            except httpx.RequestError:
+                pass  # Best effort restoration
+
+    db.delete(db_order)
+    db.commit()
+    return {"message": f"Order {db_order.id} deleted successfully"}

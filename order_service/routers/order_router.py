@@ -51,3 +51,23 @@ async def read_order_details(order_id: int, db: Session = Depends(database.get_d
     if details is None:
         raise HTTPException(status_code=404, detail="Order not found")
     return details
+
+@router.put("/{order_id}", response_model=schemas.Order)
+async def update_order(order_id: int, payload: schemas.OrderUpdate, db: Session = Depends(database.get_db)):
+    """
+    Endpoint to update order status (e.g. CANCELLED, COMPLETED).
+    """
+    db_order = order_service.get_order_by_id(db, order_id=order_id)
+    if db_order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return await order_service.update_order(db=db, db_order=db_order, order_update=payload)
+
+@router.delete("/{order_id}", status_code=status.HTTP_200_OK)
+async def delete_order(order_id: int, db: Session = Depends(database.get_db)):
+    """
+    Endpoint to delete/cancel order and release reserved stock.
+    """
+    db_order = order_service.get_order_by_id(db, order_id=order_id)
+    if db_order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return await order_service.delete_order(db=db, db_order=db_order)

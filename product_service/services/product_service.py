@@ -1,4 +1,7 @@
 from sqlalchemy.orm import Session
+from typing import Optional
+import httpx
+from fastapi import HTTPException
 from .. import models, schemas
 
 # =====================================================================
@@ -14,11 +17,30 @@ def get_product_by_id(db: Session, product_id: int):
     """
     return db.query(models.Product).filter(models.Product.id == product_id).first()
 
-def get_products(db: Session, skip: int = 0, limit: int = 100):
+def get_products(
+    db: Session, 
+    q: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    in_stock: Optional[bool] = None,
+    skip: int = 0, 
+    limit: int = 100
+):
     """
-    Returns a list of products supporting pagination (offset/limit).
+    Returns a list of products supporting pagination, name search, price range filtering, and stock filtering.
     """
-    return db.query(models.Product).offset(skip).limit(limit).all()
+    query = db.query(models.Product)
+    if q and q.strip():
+        query = query.filter(models.Product.name.ilike(f"%{q.strip()}%"))
+    if min_price is not None:
+        query = query.filter(models.Product.price >= min_price)
+    if max_price is not None:
+        query = query.filter(models.Product.price <= max_price)
+    if in_stock is True:
+        query = query.filter(models.Product.stock > 0)
+    elif in_stock is False:
+        query = query.filter(models.Product.stock == 0)
+    return query.offset(skip).limit(limit).all()
 
 def create_product(db: Session, product: schemas.ProductCreate):
     """
@@ -51,3 +73,35 @@ def update_product(db: Session, db_product: models.Product, product_update: sche
     db.commit()
     db.refresh(db_product)
     return db_product
+
+def restore_stock(db: Session, db_product: models.Product, quantity: int):
+    """
+    Restores inventory quantity for a product (e.g. upon order cancellation or restocking).
+    """
+    db_product.stock += quantity
+    db.commit()
+    db.refresh(db_product)
+    return db_product
+
+async def delete_product(db: Session, db_product: models.Product):
+    """
+    Safely deletes a product from the catalog after asserting no orders depend on it.
+    """
+    ORDER_SERVICE_URL = "http://localhost:8013"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            res = await client.get(f"{ORDER_SERVICE_URL}/orders")
+            if res.status_code == 200:
+                orders = res.json()
+                matching_orders = [o for o in orders if o.get("product_id") == db_product.id]
+                if matching_orders:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Cannot delete product '{db_product.name}' (ID: {db_product.id}) because it is referenced in {len(matching_orders)} existing order(s). Consider updating stock to 0 instead."
+                    )
+    except httpx.RequestError:
+        pass
+
+    db.delete(db_product)
+    db.commit()
+    return {"message": f"Product #{db_product.id} ('{db_product.name}') deleted successfully"}

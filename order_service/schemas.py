@@ -19,6 +19,10 @@ class OrderBase(BaseModel):
 class OrderCreate(OrderBase):
     pass
 
+# Schema for updating an existing Order
+class OrderUpdate(BaseModel):
+    status: Optional[str] = None
+
 # Schema representing the structured response returned to the client
 class Order(OrderBase):
     id: int
