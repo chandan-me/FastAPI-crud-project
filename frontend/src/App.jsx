@@ -594,7 +594,7 @@ function App() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. alice@example.com"
+                  placeholder="e.g. user@gmail.com"
                   required
                 />
               </div>
@@ -617,8 +617,8 @@ function App() {
                 <div style={{ fontWeight: "700", color: "#0d9488", marginBottom: "0.35rem" }}>
                   🔑 Quick Demo Accounts:
                 </div>
-                <div>• <strong>Admin:</strong> <code>alice@gmail.com</code> (Full Product CRUD)</div>
-                <div>• <strong>Customer:</strong> <code>bob@gmail.com</code> (Purchase Only)</div>
+                <div>• <strong>Admin:</strong> <code>admin@gmail.com</code> (Full Product CRUD)</div>
+                <div>• <strong>Customer:</strong> <code>customer@gmail.com</code> (Purchase Only)</div>
               </div>
 
               <p style={{ textAlign: "center", marginTop: "1rem", fontSize: "0.85rem", color: "#64748b" }}>
@@ -637,7 +637,7 @@ function App() {
                   type="text"
                   value={regName}
                   onChange={(e) => setRegName(e.target.value)}
-                  placeholder="e.g. Alice Johnson"
+                  placeholder="e.g. User Name"
                   required
                 />
               </div>
@@ -647,7 +647,7 @@ function App() {
                   type="email"
                   value={regEmail}
                   onChange={(e) => setRegEmail(e.target.value)}
-                  placeholder="e.g. alice@example.com"
+                  placeholder="e.g. user@gmail.com"
                   required
                 />
               </div>
