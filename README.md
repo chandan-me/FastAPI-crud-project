@@ -2,6 +2,9 @@
 
 A production-grade, distributed microservices platform built with **Python (FastAPI)**, **MySQL**, and **React (Vite)**. The platform implements an API gateway with direct routing and JWT gatekeeper security, dynamic reverse proxying, per-service isolated databases, and distributed saga transactions for order processing with automated inventory deduction.
 
+> [!NOTE]
+> For detailed visual sequence diagrams of every request flow (registration, catalog browsing, distributed saga checkout, and data federation), see [ARCHITECTURE.md](file:///c:/Users/user/Downloads/microservices/ARCHITECTURE.md).
+
 ---
 
 ## 🏛️ System Architecture
@@ -51,9 +54,9 @@ flowchart TD
 
 ---
 
-## 📂 Clean Architecture Directory Structure
+## 📂 Simplified & Clean Microservices Directory Structure
 
-Every service strictly follows the **Separation of Concerns (SoC)** layered architecture:
+Every service is streamlined and cohesive with zero bloat:
 
 ```
 microservices/
@@ -63,41 +66,37 @@ microservices/
 ├── README.md                    # System documentation & manual
 ├── requirements.txt             # Python packages & dependencies
 ├── run_all.py                   # Master process orchestrator
-├── verify.py                    # End-to-end integration test suite
+├── test_crud.py                 # Comprehensive RBAC & CRUD integration test suite
+├── verify.py                    # End-to-end gateway verification suite
 │
-├── gateway_service/             # Central API Gateway
-│   ├── auth.py                  # JWT encoding, decoding & token gatekeeper
-│   └── main.py                  # Direct reverse proxy & routing
+├── gateway_service/             # Central API Gateway (Port 8010)
+│   ├── auth.py                  # JWT encoding, decoding & token verification
+│   └── main.py                  # Direct reverse proxy, ACL whitelist & RBAC enforcement
 │
 ├── user_service/                # User Domain Service (Port 8011)
-│   ├── config.py                # Environment & SQLAlchemy URL generator
-│   ├── database.py              # Engine setup & SessionLocal dependency
+│   ├── database.py              # MySQL engine setup & SessionLocal dependency
 │   ├── models.py                # SQLAlchemy ORM model ('users' table)
-│   ├── schemas.py               # Pydantic schemas (UserCreate, UserResponse)
-│   ├── routers/user_router.py   # FastAPI route controller
-│   ├── services/user_service.py # Database queries & CRUD operations
-│   └── main.py                  # Application entry point
+│   ├── schemas.py               # Pydantic schemas (UserCreate, UserUpdate, User)
+│   └── main.py                  # FastAPI application, route handlers & CRUD logic
 │
 ├── product_service/             # Product Domain Service (Port 8012)
-│   ├── config.py, database.py, main.py
+│   ├── database.py              # MySQL engine setup & SessionLocal dependency
 │   ├── models.py                # SQLAlchemy ORM model ('products' table)
-│   ├── schemas.py               # Pydantic schemas (ProductCreate, ProductUpdate)
-│   ├── routers/product_router.py
-│   └── services/product_service.py # Inventory management & stock reduction
+│   ├── schemas.py               # Pydantic schemas (ProductCreate, ProductUpdate, etc.)
+│   └── main.py                  # FastAPI application, route handlers & inventory logic
 │
 ├── order_service/               # Order Domain Service (Port 8013)
-│   ├── config.py, database.py, main.py
+│   ├── database.py              # MySQL engine setup & SessionLocal dependency
 │   ├── models.py                # SQLAlchemy ORM model ('orders' table)
-│   ├── schemas.py               # Pydantic schemas (OrderCreate, OrderDetail)
-│   ├── routers/order_router.py  # User-scoped order endpoints
-│   └── services/order_service.py # Distributed saga coordinator & HTTPX clients
+│   ├── schemas.py               # Pydantic schemas (OrderCreate, OrderDetail, etc.)
+│   └── main.py                  # FastAPI application, distributed saga & federation logic
 │
 └── frontend/                    # Single-Page Application (React 18 + Vite)
     ├── package.json
     ├── vite.config.js
     └── src/
         ├── App.jsx              # Marketplace dashboard, auth modal, order UI
-        ├── index.css            # Custom responsive modern stylesheet
+        └── index.css            # Custom responsive modern stylesheet
         └── main.jsx             # React DOM root entry
 ```
 

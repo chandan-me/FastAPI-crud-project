@@ -67,7 +67,10 @@ function App() {
   // 2. REST API Fetch Calls
   // ---------------------------------------------------------------------
 
-  // Fetch product catalog (supports query filtering)
+  // [DATA TRAVEL FLOW - FETCH PRODUCTS]:
+  //   React Frontend (Browser) -> API Gateway (http://localhost:8010/products)
+  //   -> Reverse Proxy forwards to Product Service (http://127.0.0.1:8012/products)
+  //   -> Product Service reads MySQL (products_db.products) -> Returns JSON to Frontend
   const fetchProducts = async (query = "") => {
     try {
       const url = query.trim()
@@ -92,7 +95,11 @@ function App() {
     }
   };
 
-  // Fetch orders history (Admins see all; Customers see their own)
+  // [DATA TRAVEL FLOW - FETCH ORDERS]:
+  //   React Frontend (Browser, Bearer JWT) -> API Gateway (http://localhost:8010/orders)
+  //   -> Gateway validates token & scopes customer to user_id
+  //   -> Reverse Proxy forwards to Order Service (http://127.0.0.1:8013/orders)
+  //   -> Order Service reads MySQL (orders_db.orders) -> Returns JSON to Frontend
   const fetchOrders = async (authToken, currentUser) => {
     try {
       const activeUser = currentUser || user;
@@ -166,6 +173,10 @@ function App() {
   // 3. User & Auth Logic
   // ---------------------------------------------------------------------
 
+  // [DATA TRAVEL FLOW - USER LOGIN]:
+  //   React Frontend (Browser) -> API Gateway (http://localhost:8010/auth/login)
+  //   -> User Service (http://127.0.0.1:8011/users/by-email?email=...) -> MySQL (users_db.users)
+  //   -> Gateway creates signed JWT -> Returns { access_token, user } to Frontend
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
@@ -199,6 +210,10 @@ function App() {
     }
   };
 
+  // [DATA TRAVEL FLOW - USER REGISTRATION]:
+  //   React Frontend (Browser) -> API Gateway (http://localhost:8010/auth/register)
+  //   -> User Service (http://127.0.0.1:8011/users/) -> MySQL (users_db.users)
+  //   -> Gateway creates signed JWT -> Returns { access_token, user } to Frontend
   const handleRegister = async (e) => {
     e.preventDefault();
     setError("");
@@ -438,6 +453,14 @@ function App() {
   // 5. Order Operations (Purchase & Lifecycle)
   // ---------------------------------------------------------------------
 
+  // [DATA TRAVEL FLOW - PLACE ORDER (DISTRIBUTED SAGA)]:
+  //   1. React Frontend (Browser, Bearer JWT) -> API Gateway (http://localhost:8010/orders)
+  //   2. Gateway verifies JWT, injects user_id -> Order Service (http://127.0.0.1:8013/orders)
+  //   3. Order Service coordinates 3 distributed calls:
+  //      - Calls User Service (http://127.0.0.1:8011/users/{user_id}) -> asserts user exists
+  //      - Calls Product Service (http://127.0.0.1:8012/products/{product_id}) -> verifies stock
+  //      - Calls Product Service (PUT .../reduce-stock) -> atomically deducts inventory
+  //   4. Order Service writes order to MySQL (orders_db.orders) -> Returns confirmed Order to Frontend
   const handlePlaceOrder = async (e) => {
     e.preventDefault();
     if (isPurchasing) return;

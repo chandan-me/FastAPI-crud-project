@@ -1,27 +1,25 @@
+import os
+from urllib.parse import quote_plus
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from .config import DATABASE_URL
 
-# =====================================================================
-# DATABASE SESSION SETUP (Product Service)
-# This module configures SQLAlchemy engine and session factories.
-# It establishes database connections and exposes session instances.
-# =====================================================================
+# Load root-level .env
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
-# Create the SQLAlchemy Engine. This manages database connection pooling.
-engine = create_engine(DATABASE_URL)
+MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+MYSQL_PORT = os.getenv("MYSQL_PORT", "3306")
+MYSQL_USER = os.getenv("MYSQL_USER", "root")
+MYSQL_PASSWORD = quote_plus(os.getenv("MYSQL_PASSWORD", ""))
+MYSQL_DATABASE = os.getenv("MYSQL_DATABASE_PRODUCTS", "products_db")
 
-# Create a session factory. SessionLocal instances will represent transaction units.
-# autocommit=False ensures transactions are manually committed (or rolled back).
-# autoflush=False prevents automatic queries execution before manual commit.
+DATABASE_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}"
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Base class for declarative models. DB models inherit from this to map to SQL tables.
 Base = declarative_base()
 
-# Dependency generator to inject database sessions into FastAPI routes.
-# Yields a session instance and guarantees cleanup (closing session) after execution.
 def get_db():
     db = SessionLocal()
     try:

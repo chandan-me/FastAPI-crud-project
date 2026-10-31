@@ -1,27 +1,28 @@
+import os
+import json
+import httpx
 from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-import httpx
 from pydantic import BaseModel
-from . import auth
-import json
-import os
 
-# =====================================================================
-# API GATEWAY (Direct Microservice Routing with ACL Whitelist)
-# 
-# Routes requests directly to microservice instances.
-# 
-# Key Features:
-#   1. Whitelist Access Control: Protects all routes by default except login/catalog.
-#   2. Direct Service Resolution: Maps service routes to downstream service ports.
-#   3. RBAC Enforcement: Admin vs Customer roles.
-# =====================================================================
+try:
+    from . import auth
+except ImportError:
+    import auth
 
-app = FastAPI(
-    title="API Gateway", 
-    description="API Gateway with Direct Routing & ACL Whitelist"
-)
+# ==============================================================================
+# API GATEWAY (Port 8010)
+#
+# High-Level Data Travel Architecture:
+#   1. React Frontend (Browser Port 5173) connects exclusively to this Gateway.
+#   2. Local Auth Routes (/auth/*) validate credentials and issue JWT tokens.
+#   3. Catch-All Proxy (/{service_prefix}/*) validates JWT & RBAC, then forwards
+#      requests directly to downstream microservices (Ports 8011, 8012, 8013).
+#   4. Downstream responses are streamed back to the client.
+# ==============================================================================
+
+app = FastAPI(title="API Gateway", description="Unified API Gateway with Direct Routing & RBAC")
 
 # Enable CORS for React Frontend (Port 5173)
 app.add_middleware(
@@ -32,23 +33,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Direct Static Service Mappings
+# Service Port Mapping Directory
 SERVICE_URL_MAP = {
     "users": os.getenv("USER_SERVICE_URL", "http://127.0.0.1:8011"),
     "products": os.getenv("PRODUCT_SERVICE_URL", "http://127.0.0.1:8012"),
     "orders": os.getenv("ORDER_SERVICE_URL", "http://127.0.0.1:8013"),
 }
 
-async def resolve_service_url(service_prefix: str) -> str:
-    """
-    Resolves the direct host URL for a service.
-    """
-    target_url = SERVICE_URL_MAP.get(service_prefix)
-    if not target_url:
-        raise HTTPException(status_code=404, detail="Service mapping prefix not found")
-    return target_url
-
-# ACCESS CONTROL LIST (ACL) Whitelist
+# Publicly accessible routes that bypass JWT token authentication
 PUBLIC_ROUTES = [
     ("POST", "/auth/login"),
     ("POST", "/auth/register"),
@@ -63,108 +55,128 @@ class RegisterRequest(BaseModel):
     email: str
     role: str = "customer"
 
-# ---------------------------------------------------------------------
-# 1. GATEWAY AUTHENTICATION ENDPOINTS (Local Gateway Auth Handling)
-# ---------------------------------------------------------------------
 
+# ==============================================================================
+# [DATA TRAVEL FLOW - USER LOGIN]:
+#   Step 1: Frontend sends { email } -> POST http://127.0.0.1:8010/auth/login
+#   Step 2: Gateway forwards request -> GET http://127.0.0.1:8011/users/by-email?email=...
+#   Step 3: User Service checks MySQL (users_db.users) and returns user record
+#   Step 4: Gateway generates signed JWT { user_id, email, role, exp }
+#   Step 5: Gateway returns { access_token, token_type, user } back to Frontend
+# ==============================================================================
 @app.post("/auth/login")
 async def login(payload: LoginRequest):
-    """Authenticates credentials against User Service database and issues JWT."""
-    async with httpx.AsyncClient() as client:
+    """Authenticates credentials against User Service and issues JWT."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            # Query User Service
-            user_host = await resolve_service_url("users")
+            # Step 2: Forward lookup to User Service
+            user_host = SERVICE_URL_MAP["users"]
             res = await client.get(f"{user_host}/users/by-email", params={"email": payload.email.strip()})
             if res.status_code == 404:
                 raise HTTPException(status_code=401, detail="Email address not registered")
             elif res.status_code != 200:
                 raise HTTPException(status_code=500, detail="User Service database connection failed")
-            
+
+            # Step 4: Issue signed JWT access token
             user = res.json()
             user_role = user.get("role", "customer")
             token = auth.create_access_token(data={"user_id": user["id"], "email": user["email"], "role": user_role})
+
+            # Step 5: Return token and user profile to Frontend
             return {"access_token": token, "token_type": "bearer", "user": user}
         except httpx.RequestError:
             raise HTTPException(status_code=503, detail="User Service is offline")
 
+
+# ==============================================================================
+# [DATA TRAVEL FLOW - USER REGISTRATION]:
+#   Step 1: Frontend sends { name, email, role } -> POST http://127.0.0.1:8010/auth/register
+#   Step 2: Gateway forwards JSON -> POST http://127.0.0.1:8011/users/
+#   Step 3: User Service inserts record into MySQL (users_db.users) and returns created user with ID
+#   Step 4: Gateway signs new JWT containing { user_id, email, role, exp }
+#   Step 5: Gateway returns { access_token, token_type, user } back to Frontend
+# ==============================================================================
 @app.post("/auth/register")
 async def register(payload: RegisterRequest):
     """Registers user in User Service and issues JWT access token."""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            # Resolve downstream User Service
-            user_host = await resolve_service_url("users")
+            # Step 2: Forward registration payload to User Service
+            user_host = SERVICE_URL_MAP["users"]
             res = await client.post(f"{user_host}/users/", json=payload.dict())
             if res.status_code == 400:
                 raise HTTPException(status_code=400, detail="Email already registered")
             elif res.status_code != 201:
                 raise HTTPException(status_code=500, detail="User registration failed")
-            
+
+            # Step 4: Issue signed JWT token for the newly created user
             user = res.json()
             user_role = user.get("role", "customer")
             token = auth.create_access_token(data={"user_id": user["id"], "email": user["email"], "role": user_role})
+
+            # Step 5: Return token and user profile to Frontend
             return {"access_token": token, "token_type": "bearer", "user": user}
         except httpx.RequestError:
             raise HTTPException(status_code=503, detail="User Service is offline")
 
-# ---------------------------------------------------------------------
-# 2. DYNAMIC CATCH-ALL REVERSE PROXY ROUTE (With Whitelist Enforcement)
-# ---------------------------------------------------------------------
 
+# ==============================================================================
+# [DATA TRAVEL FLOW - DYNAMIC REVERSE PROXY]:
+#   Step 1: Frontend sends request -> http://127.0.0.1:8010/{service_prefix}/{path}
+#   Step 2: Gateway verifies route against PUBLIC_ROUTES whitelist.
+#           - If protected: validates Authorization: Bearer <token> & decodes JWT.
+#   Step 3: Gateway enforces RBAC rules:
+#           - Products: Only Admin can POST, PUT, DELETE.
+#           - Orders POST: Injects authenticated user_id from token into body.
+#           - Orders GET: Scopes customer view to their own user_id.
+#           - Users/Orders PUT/DELETE: Prevents users from modifying other accounts.
+#   Step 4: Gateway forwards request downstream using HTTPX:
+#           - /users/*    -> http://127.0.0.1:8011/users/*
+#           - /products/* -> http://127.0.0.1:8012/products/*
+#           - /orders/*   -> http://127.0.0.1:8013/orders/*
+#   Step 5: Target microservice responds; Gateway relays exact status & body to Frontend.
+# ==============================================================================
 @app.api_route("/{service_prefix}", methods=["GET", "POST", "PUT", "DELETE"])
 @app.api_route("/{service_prefix}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str = ""):
-    """
-    Catch-all route. Intercepts incoming requests dynamically.
-    - Resolves downstream service URL directly.
-    - Inspects prefix and path against PUBLIC_ROUTES whitelist.
-    - Enforces JWT validation if the route is protected.
-    - Applies Role-Based Access Control (RBAC): Admin vs Customer.
-    - Forwards request content downstream, returning response back to client.
-    """
-    # 1. Resolve microservice address directly
-    target_host = await resolve_service_url(service_prefix)
-    target_url = f"{target_host}{request.url.path}"
-    
-    # 2. Clone headers and prepare request parameters
-    headers = dict(request.headers)
-    headers.pop("host", None) # Prevent destination host mismatches
-    headers.pop("content-length", None) # Allow HTTPX to recalculate size dynamically
-    query_params = request.query_params
-    method = request.method
-    body = await request.body()
-    
-    # 3. Whitelist Check (Access Control List Validation)
-    request_path = request.url.path
-    is_public_route = False
-    
-    for allowed_method, allowed_prefix in PUBLIC_ROUTES:
-        if method == allowed_method and request_path.startswith(allowed_prefix):
-            is_public_route = True
-            break
+    """Catch-all reverse proxy route with ACL Whitelist and RBAC enforcement."""
+    # Resolve downstream microservice URL
+    target_host = SERVICE_URL_MAP.get(service_prefix)
+    if not target_host:
+        raise HTTPException(status_code=404, detail="Service mapping prefix not found")
 
-    # 4. Enforce Token Security on Protected Routes
+    target_url = f"{target_host}{request.url.path}"
+    method = request.method
+    request_path = request.url.path
+    query_params = request.query_params
+    body = await request.body()
+
+    # Headers cleanup (prevent host & content-length mismatches)
+    headers = dict(request.headers)
+    headers.pop("host", None)
+    headers.pop("content-length", None)
+
+    # Check if request is on the public whitelist
+    is_public_route = any(
+        method == m and request_path.startswith(p)
+        for m, p in PUBLIC_ROUTES
+    )
+
+    # Token & RBAC enforcement on protected routes
     user_payload = {}
     if not is_public_route:
         auth_header = headers.get("authorization", "")
         if not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, 
-                detail="Access token is missing"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Access token is missing")
+
         token = auth_header.split(" ")[1]
         user_payload = auth.decode_access_token(token)
         if not user_payload:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, 
-                detail="Access token is invalid or expired"
-            )
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Access token is invalid or expired")
 
         user_role = (user_payload.get("role") or "customer").lower()
 
-        # 4.1 RBAC Enforcement for Product Management:
-        # ONLY Admin can Create, Update, or Delete products (Customers can only view and purchase)
+        # RBAC: Only Admin can create, update, or delete products
         if service_prefix == "products" and method in ("POST", "PUT", "DELETE"):
             if user_role != "admin":
                 raise HTTPException(
@@ -172,23 +184,22 @@ async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str
                     detail="Access denied: Admin role required to create, modify, or delete products"
                 )
 
-        # 4.2 Secure Ingestion: If creating order, inject user_id from token to prevent spoofing
+        # Ingestion Security: Inject authenticated user_id into order body to prevent spoofing
         if service_prefix == "orders" and method == "POST" and body:
             try:
                 body_json = json.loads(body)
                 body_json["user_id"] = user_payload["user_id"]
                 body = json.dumps(body_json).encode("utf-8")
-                headers.pop("content-length", None)
             except Exception:
                 raise HTTPException(status_code=400, detail="Invalid JSON request body")
 
-        # 4.3 Secure Isolation: Customers can only view their own orders; Admins can view all orders
+        # Isolation: Customers can only view their own orders; Admins can view all orders
         if service_prefix == "orders" and method == "GET" and (path == "" or path == "/"):
             if user_role != "admin":
                 query_params = dict(query_params)
                 query_params["user_id"] = str(user_payload["user_id"])
 
-        # 4.4 Secure Authorization: Users can only modify or delete their own profile (unless admin)
+        # Authorization: Standard users can only modify/delete their own profile
         if service_prefix == "users" and method in ("PUT", "DELETE"):
             clean_path = path.strip("/")
             if clean_path.isdigit():
@@ -198,26 +209,26 @@ async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str
                         detail="You are not authorized to modify or delete another user's profile"
                     )
 
-    # 5. Proxy/Forward the request to the correct microservice using HTTPX Client
-    async with httpx.AsyncClient() as client:
-        # Check order ownership for PUT / DELETE on orders (Admins can manage any; Customers only their own)
-        if not is_public_route and service_prefix == "orders" and method in ("PUT", "DELETE"):
-            user_role = (user_payload.get("role") or "customer").lower()
+        # Authorization: Standard users can only modify/delete their own orders
+        if service_prefix == "orders" and method in ("PUT", "DELETE"):
             if user_role != "admin":
                 clean_path = path.strip("/")
                 if clean_path.isdigit():
-                    try:
-                        chk = await client.get(f"{target_host}/orders/{clean_path}")
-                        if chk.status_code == 200:
-                            order_info = chk.json()
-                            if order_info.get("user_id") != user_payload["user_id"]:
-                                raise HTTPException(
-                                    status_code=status.HTTP_403_FORBIDDEN,
-                                    detail="You are not authorized to modify or delete another user's order"
-                                )
-                    except httpx.RequestError:
-                        pass
+                    async with httpx.AsyncClient(timeout=5.0) as client:
+                        try:
+                            chk = await client.get(f"{target_host}/orders/{clean_path}")
+                            if chk.status_code == 200:
+                                order_info = chk.json()
+                                if order_info.get("user_id") != user_payload["user_id"]:
+                                    raise HTTPException(
+                                        status_code=status.HTTP_403_FORBIDDEN,
+                                        detail="You are not authorized to modify or delete another user's order"
+                                    )
+                        except httpx.RequestError:
+                            pass
 
+    # Step 4 & 5: Forward request downstream and relay response back to client
+    async with httpx.AsyncClient(timeout=15.0) as client:
         try:
             response = await client.request(
                 method=method,
@@ -225,11 +236,8 @@ async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str
                 headers=headers,
                 params=query_params,
                 content=body,
-                follow_redirects=True, # Follow redirects (like trailing slash adjustments)
-                timeout=15.0
+                follow_redirects=True
             )
-            
-            # Return the exact response from the microservice (content, status, headers)
             return Response(
                 content=response.content,
                 status_code=response.status_code,
@@ -237,6 +245,11 @@ async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str
             )
         except httpx.RequestError:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, 
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"{service_prefix.capitalize()} service is offline"
             )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8010)
