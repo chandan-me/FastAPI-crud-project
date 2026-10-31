@@ -318,10 +318,7 @@ def get_dashboard():
                     <div class="stat-title">Registry Port</div>
                     <div class="stat-value">8761</div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-title">Discovery Type</div>
-                    <div class="stat-value" style="font-size: 1.15rem; font-family: 'JetBrains Mono'; padding-top: 0.25rem;">Eureka-Compatible</div>
-                </div>
+
                 <div class="stat-card">
                     <div class="stat-title">Server Uptime</div>
                     <div class="stat-value" style="font-family: 'JetBrains Mono'; font-size: 1.35rem; padding-top: 0.15rem;">{uptime_str}</div>

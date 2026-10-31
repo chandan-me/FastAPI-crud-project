@@ -94,3 +94,29 @@ async def delete_user(db: Session, db_user: models.User):
     db.delete(db_user)
     db.commit()
     return {"message": f"User #{db_user.id} deleted successfully"}
+
+
+"""
+================================
+         FRONTEND
+             |
+             | Register user
+             v
+      API GATEWAY
+             |
+             v
+      USER ROUTER
+             |
+             v
+     USER_SERVICE.PY
+
+
+      Business Logic
+             |
+             v
+        DATABASE.PY
+             |
+             v
+           MYSQL
+===============================
+"""

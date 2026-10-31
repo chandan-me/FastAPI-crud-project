@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 
 // API Gateway base URL
-const GATEWAY_URL = "http://localhost:8010";
+const GATEWAY_URL = "http://localhost:8010"; // This tells React where to send its API requests.
 
 function App() {
   // Authentication & Session States
@@ -556,7 +556,7 @@ function App() {
         {user ? (
           <div className="action-btn-group">
             <span>
-              Welcome, <strong>{user.name}</strong> ({user.email})
+              Welcome, ({user.email})
               <span className={`role-badge ${user.role || "customer"}`}>
                 {(user.role || "customer").toUpperCase()}
               </span>
@@ -615,7 +615,7 @@ function App() {
                 }}
               >
                 <div style={{ fontWeight: "700", color: "#0d9488", marginBottom: "0.35rem" }}>
-                  🔑 Quick Demo Accounts:
+                  Demo Accounts:
                 </div>
                 <div>• <strong>Admin:</strong> <code>admin@gmail.com</code> (Full Product CRUD)</div>
                 <div>• <strong>Customer:</strong> <code>customer@gmail.com</code> (Purchase Only)</div>

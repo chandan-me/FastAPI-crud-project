@@ -15,11 +15,10 @@ app = FastAPI(
 )
 
 # Trigger automatic creation of database tables if they do not already exist.
-# Note: In production projects, migrations (e.g. Alembic) are used instead.
 models.Base.metadata.create_all(bind=database.engine)
 
 # Register endpoints from user_router
-app.include_router(user_router.router)
+app.include_router(user_router.router)  
 
 # --- Service Discovery Registration ---
 from .discovery_client import DiscoveryClient
