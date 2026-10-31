@@ -63,7 +63,6 @@ microservices/
 ├── README.md                    # System documentation & manual
 ├── requirements.txt             # Python packages & dependencies
 ├── run_all.py                   # Master process orchestrator
-├── seed_databases.py            # MySQL database initializer & seeder
 ├── verify.py                    # End-to-end integration test suite
 │
 ├── gateway_service/             # Central API Gateway
@@ -147,16 +146,7 @@ cd ..
 
 ---
 
-### 4. Initialize & Seed MySQL Databases
-Create schemas (`users_db`, `products_db`, `orders_db`) and populate default seed data:
-
-```powershell
-python seed_databases.py
-```
-
----
-
-### 5. Start the Entire Workspace
+### 4. Start the Entire Workspace
 Launch all 3 Microservices, the API Gateway, and the React Frontend concurrently:
 
 ```powershell
@@ -279,10 +269,4 @@ Get-NetTCPConnection -LocalPort 8010, 8011, 8012, 8013, 5173 -ErrorAction Silent
 
 # Terminate orphaned Python or Node processes:
 Stop-Process -Name python, node -Force
-```
-
-### Resetting Databases
-To wipe and reseed test tables back to their initial state:
-```powershell
-python seed_databases.py
 ```
