@@ -46,7 +46,7 @@ async def run_tests():
         token = ""
         user_id = None
         try:
-            payload = {"email": "alice@example.com"}
+            payload = {"email": "alice@gmail.com"}
             res = await client.post(f"{GATEWAY_URL}/auth/login", json=payload)
             if res.status_code == 200:
                 data = res.json()

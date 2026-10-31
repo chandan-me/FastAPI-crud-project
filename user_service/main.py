@@ -18,18 +18,6 @@ app = FastAPI(
 models.Base.metadata.create_all(bind=database.engine)
 
 # Register endpoints from user_router
-app.include_router(user_router.router)  
+app.include_router(user_router.router)
 
-# --- Service Discovery Registration ---
-from .discovery_client import DiscoveryClient
-
-discovery_client = DiscoveryClient(app_name="user-service", port=8011)
-
-@app.on_event("startup")
-def startup_event():
-    discovery_client.start()
-
-@app.on_event("shutdown")
-def shutdown_event():
-    discovery_client.stop()
 

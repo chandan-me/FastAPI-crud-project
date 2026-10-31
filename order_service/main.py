@@ -20,16 +20,4 @@ models.Base.metadata.create_all(bind=database.engine)
 # Register endpoints from order_router
 app.include_router(order_router.router)
 
-# --- Service Discovery Registration ---
-from .discovery_client import DiscoveryClient
-
-discovery_client = DiscoveryClient(app_name="order-service", port=8013)
-
-@app.on_event("startup")
-def startup_event():
-    discovery_client.start()
-
-@app.on_event("shutdown")
-def shutdown_event():
-    discovery_client.stop()
 

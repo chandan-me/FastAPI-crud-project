@@ -4,8 +4,8 @@ import time
 import os
 
 # =====================================================================
-# SYSTEM ORCHESTRATOR SCRIPT (React + Gateway + Eureka Discovery + Microservices)
-# This script launches all 6 components of the system concurrently.
+# SYSTEM ORCHESTRATOR SCRIPT (React + Gateway + Microservices)
+# This script launches all 5 components of the system concurrently.
 # It captures logs to separate files and monitors startup diagnostic checks.
 # =====================================================================
 
@@ -23,39 +23,24 @@ def main():
     log_files = []
     try:
         print("=" * 60)
-        print("STARTING DISCOVERY SERVICE & MICROSERVICES WORKSPACE")
+        print("STARTING MICROSERVICES WORKSPACE")
         print("=" * 60)
         
         # Proactively free any ports that may have remained open from a previous run
-        print("[System] Checking and freeing ports (8762, 8011, 8012, 8013, 8010, 5173)...")
-        free_ports([8762, 8011, 8012, 8013, 8010, 5173])
+        print("[System] Checking and freeing ports (8011, 8012, 8013, 8010, 5173)...")
+        free_ports([8011, 8012, 8013, 8010, 5173])
         time.sleep(1)
 
         # Open write streams for each component's log files
-        discovery_log = open("discovery_service.log", "w", encoding="utf-8")
         user_log = open("user_service.log", "w", encoding="utf-8")
         product_log = open("product_service.log", "w", encoding="utf-8")
         order_log = open("order_service.log", "w", encoding="utf-8")
         gateway_log = open("gateway_service.log", "w", encoding="utf-8")
         frontend_log = open("frontend.log", "w", encoding="utf-8")
         
-        log_files.extend([discovery_log, user_log, product_log, order_log, gateway_log, frontend_log])
+        log_files.extend([user_log, product_log, order_log, gateway_log, frontend_log])
         
-        # 1. Start Service Discovery Registry (Port 8762) FIRST!
-        # Microservices require this registry server to be UP during startup to register themselves.
-        print("[System] Launching Demo Discovery Server on http://127.0.0.1:8762 ...")
-        discovery_proc = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "discovery_service.main:app", "--port", "8762"],
-            stdout=discovery_log,
-            stderr=subprocess.STDOUT
-        )
-        processes.append((discovery_proc, "Discovery Server", "discovery_service.log"))
-        
-        # Give Discovery Server 3 seconds to fully initialize and bind to the port
-        print("[System] Waiting for Discovery Server to bind to port 8762...")
-        time.sleep(3)
-
-        # 2. Start User Service (Port 8011)
+        # 1. Start User Service (Port 8011)
         print("[System] Launching User Service on http://127.0.0.1:8011 ...")
         user_proc = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "user_service.main:app", "--port", "8011"],
@@ -64,7 +49,7 @@ def main():
         )
         processes.append((user_proc, "User Service", "user_service.log"))
         
-        # 3. Start Product Service (Port 8012)
+        # 2. Start Product Service (Port 8012)
         print("[System] Launching Product Service on http://127.0.0.1:8012 ...")
         product_proc = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "product_service.main:app", "--port", "8012"],
@@ -73,7 +58,7 @@ def main():
         )
         processes.append((product_proc, "Product Service", "product_service.log"))
 
-        # 4. Start Order Service (Port 8013)
+        # 3. Start Order Service (Port 8013)
         print("[System] Launching Order Service on http://127.0.0.1:8013 ...")
         order_proc = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "order_service.main:app", "--port", "8013"],
@@ -82,7 +67,7 @@ def main():
         )
         processes.append((order_proc, "Order Service", "order_service.log"))
 
-        # 5. Start API Gateway (Port 8010)
+        # 4. Start API Gateway (Port 8010)
         print("[System] Launching API Gateway on http://127.0.0.1:8010 ...")
         gateway_proc = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "gateway_service.main:app", "--port", "8010"],
@@ -91,7 +76,7 @@ def main():
         )
         processes.append((gateway_proc, "API Gateway", "gateway_service.log"))
 
-        # 6. Start React Frontend (Port 5173 via Vite)
+        # 5. Start React Frontend (Port 5173 via Vite)
         print("[System] Launching React Frontend on http://localhost:5173 ...")
         frontend_proc = subprocess.Popen(
             ["npm", "run", "dev"],
@@ -102,8 +87,8 @@ def main():
         )
         processes.append((frontend_proc, "React Frontend", "frontend.log"))
 
-        # Pause execution to let services register and start heartbeat tasks
-        time.sleep(5)
+        # Pause execution to let services initialize
+        time.sleep(3)
         
         # Perform check to see if any process crashed immediately
         any_failed = False
@@ -119,7 +104,6 @@ def main():
             raise KeyboardInterrupt
         
         print("\n[System] All microservices and frontend started successfully!")
-        print("  - Discovery Server Dashboard: http://localhost:8762")
         print("  - React Frontend App:         http://localhost:5173")
         print("  - API Gateway API Docs:       http://127.0.0.1:8010/docs")
         print("\nPress Ctrl+C to terminate all components.")
@@ -144,7 +128,7 @@ def main():
                 f.close()
             except Exception:
                 pass
-        free_ports([8762, 8011, 8012, 8013, 8010, 5173])
+        free_ports([8011, 8012, 8013, 8010, 5173])
 
 if __name__ == "__main__":
     main()

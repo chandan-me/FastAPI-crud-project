@@ -37,7 +37,6 @@ venv.bak/
 # --- Runtime & Microservice Logs ---
 *.log
 *.log.*
-discovery_service.log
 gateway_service.log
 user_service.log
 product_service.log

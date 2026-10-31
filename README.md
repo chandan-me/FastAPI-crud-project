@@ -1,6 +1,6 @@
 # Layered FastAPI MySQL Microservices & React Dashboard
 
-A production-grade, distributed microservices platform built with **Python (FastAPI)**, **MySQL**, and **React (Vite)**. The platform implements service discovery, an API gateway with JWT gatekeeper security, dynamic reverse proxying, per-service isolated databases, and distributed saga transactions for order processing with automated inventory deduction.
+A production-grade, distributed microservices platform built with **Python (FastAPI)**, **MySQL**, and **React (Vite)**. The platform implements an API gateway with direct routing and JWT gatekeeper security, dynamic reverse proxying, per-service isolated databases, and distributed saga transactions for order processing with automated inventory deduction.
 
 ---
 
@@ -10,7 +10,6 @@ A production-grade, distributed microservices platform built with **Python (Fast
 flowchart TD
     Client["💻 React Web Dashboard\n(Port 5173)"]
     Gateway["🛡️ API Gateway\n(Port 8010)"]
-    Discovery["📡 Eureka Discovery Registry\n(Port 8762)"]
     
     subgraph Microservices ["Isolated Domain Microservices"]
         UserService["👤 User Service\n(Port 8011)"]
@@ -25,11 +24,6 @@ flowchart TD
     end
 
     Client -->|HTTP / REST| Gateway
-    Gateway <-->|Heartbeats & App Lookup| Discovery
-    UserService <-->|Register & Heartbeat| Discovery
-    ProductService <-->|Register & Heartbeat| Discovery
-    OrderService <-->|Register & Heartbeat| Discovery
-
     Gateway -->|Proxy /auth, /users| UserService
     Gateway -->|Proxy /products| ProductService
     Gateway -->|Proxy /orders (JWT Verified)| OrderService
@@ -49,7 +43,6 @@ flowchart TD
 
 | Component | Port | Base URL | Interactive Docs (Swagger) | Database |
 | :--- | :--- | :--- | :--- | :--- |
-| **Discovery Registry** | `8762` | `http://127.0.0.1:8762` | `http://127.0.0.1:8762/docs` | In-Memory Registry |
 | **API Gateway** | `8010` | `http://127.0.0.1:8010` | `http://127.0.0.1:8010/docs` | Stateless / JWT |
 | **User Service** | `8011` | `http://127.0.0.1:8011` | `http://127.0.0.1:8011/docs` | MySQL: `users_db` |
 | **Product Service** | `8012` | `http://127.0.0.1:8012` | `http://127.0.0.1:8012/docs` | MySQL: `products_db` |
@@ -73,32 +66,28 @@ microservices/
 ├── seed_databases.py            # MySQL database initializer & seeder
 ├── verify.py                    # End-to-end integration test suite
 │
-├── discovery_service/           # Eureka-compatible Service Discovery
-│   └── main.py                  # Registry server, eviction, and dashboard
-│
 ├── gateway_service/             # Central API Gateway
 │   ├── auth.py                  # JWT encoding, decoding & token gatekeeper
-│   └── main.py                  # Dynamic reverse proxy & service discovery client
+│   └── main.py                  # Direct reverse proxy & routing
 │
 ├── user_service/                # User Domain Service (Port 8011)
 │   ├── config.py                # Environment & SQLAlchemy URL generator
 │   ├── database.py              # Engine setup & SessionLocal dependency
 │   ├── models.py                # SQLAlchemy ORM model ('users' table)
 │   ├── schemas.py               # Pydantic schemas (UserCreate, UserResponse)
-│   ├── discovery_client.py      # Background registration & heartbeats
 │   ├── routers/user_router.py   # FastAPI route controller
 │   ├── services/user_service.py # Database queries & CRUD operations
 │   └── main.py                  # Application entry point
 │
 ├── product_service/             # Product Domain Service (Port 8012)
-│   ├── config.py, database.py, discovery_client.py, main.py
+│   ├── config.py, database.py, main.py
 │   ├── models.py                # SQLAlchemy ORM model ('products' table)
 │   ├── schemas.py               # Pydantic schemas (ProductCreate, ProductUpdate)
 │   ├── routers/product_router.py
 │   └── services/product_service.py # Inventory management & stock reduction
 │
 ├── order_service/               # Order Domain Service (Port 8013)
-│   ├── config.py, database.py, discovery_client.py, main.py
+│   ├── config.py, database.py, main.py
 │   ├── models.py                # SQLAlchemy ORM model ('orders' table)
 │   ├── schemas.py               # Pydantic schemas (OrderCreate, OrderDetail)
 │   ├── routers/order_router.py  # User-scoped order endpoints
@@ -168,7 +157,7 @@ python seed_databases.py
 ---
 
 ### 5. Start the Entire Workspace
-Launch the Discovery Server, all 3 Microservices, the API Gateway, and the React Frontend concurrently:
+Launch all 3 Microservices, the API Gateway, and the React Frontend concurrently:
 
 ```powershell
 python run_all.py
@@ -176,10 +165,9 @@ python run_all.py
 
 When all services are ready, open your browser:
 - **🛍️ React Marketplace UI**: [http://localhost:5173](http://localhost:5173)
-- **📡 Discovery Dashboard**: [http://127.0.0.1:8762](http://127.0.0.1:8762)
 - **🛡️ API Gateway Swagger Docs**: [http://127.0.0.1:8010/docs](http://127.0.0.1:8010/docs)
 
-*(Press `Ctrl+C` in the terminal to gracefully terminate all 6 processes).*
+*(Press `Ctrl+C` in the terminal to gracefully terminate all processes).*
 
 ---
 
@@ -211,11 +199,10 @@ This automated test script verifies:
 
 ## 🔑 Core Features & Architectural Patterns
 
-### 1. Dynamic Service Discovery
-- Built-in Eureka-compatible registry on port `8762`.
-- Microservices register on startup using background worker threads and dispatch heartbeat pulses every 10 seconds.
-- Stale instances that fail to send heartbeats are evicted automatically after 30 seconds.
-- The Gateway dynamically queries the registry to resolve downstream network locations without hardcoded hosts.
+### 1. Direct API Gateway Routing
+- Direct reverse proxy routing on port `8010` to downstream microservices without discovery client overhead.
+- Configurable service target URLs via environment variables (`USER_SERVICE_URL`, `PRODUCT_SERVICE_URL`, `ORDER_SERVICE_URL`).
+- Fast and resilient request forwarding without client heartbeats or registration background threads.
 
 ### 2. API Gateway & Token Security
 - Centralized reverse proxy running on port `8010`.
@@ -288,7 +275,7 @@ The system defines two primary roles:
 If a previous session did not close cleanly:
 ```powershell
 # Check for processes on microservice ports:
-Get-NetTCPConnection -LocalPort 8010, 8011, 8012, 8013, 8762, 5173 -ErrorAction SilentlyContinue
+Get-NetTCPConnection -LocalPort 8010, 8011, 8012, 8013, 5173 -ErrorAction SilentlyContinue
 
 # Terminate orphaned Python or Node processes:
 Stop-Process -Name python, node -Force
