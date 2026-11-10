@@ -1,345 +1,132 @@
 import React, { useState, useEffect } from "react";
+import Navbar from "./components/Navbar";
+import ProductCard from "./components/ProductCard";
+import CartPage from "./components/CartPage";
+import OrdersPage from "./components/OrdersPage";
+import ProductModal from "./components/ProductModal";
+import ProfileModal from "./components/ProfileModal";
+import UsersModal from "./components/UsersModal";
+import AdminDashboard from "./components/AdminDashboard";
+import AuthScreen from "./components/AuthScreen";
 
-// API Gateway base URL
-const GATEWAY_URL = "http://localhost:8010"; // This tells React where to send its API requests.
+import * as api from "./services/api";
+import { formatNumber } from "./utils/format";
 
-function App() {
-  // Authentication & Session States
+/**
+ * Main Application Component - Dhee Stores
+ * Coordinates global state, authentication, full-page navigation,
+ * in-card product steppers, and distributed microservices operations.
+ */
+export default function App() {
+  // Navigation State: "products" | "cart" | "orders"
+  const [currentPage, setCurrentPage] = useState("products");
+
+  // Session States
   const [token, setToken] = useState(localStorage.getItem("token") || "");
   const [user, setUser] = useState(null);
 
-  // Form input States (Auth)
-  const [email, setEmail] = useState("");
-  const [regName, setRegName] = useState("");
-  const [regEmail, setRegEmail] = useState("");
-  const [regRole, setRegRole] = useState("customer");
-  const [isRegisterMode, setIsRegisterMode] = useState(false);
-
-  // Profile Management Modal State
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [profileName, setProfileName] = useState("");
-  const [profileEmail, setProfileEmail] = useState("");
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
-
-  // Product Catalog & Filter States
+  // Product Catalog States
   const [products, setProducts] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false);
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
-  const [productForm, setProductForm] = useState({ name: "", price: "", stock: "" });
   const [isSavingProduct, setIsSavingProduct] = useState(false);
+
+  // Shopping Cart State: [{ product, quantity }]
+  const [cartItems, setCartItems] = useState([]);
+  const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [paymentConfig, setPaymentConfig] = useState(null);
 
   // Orders State
   const [orders, setOrders] = useState([]);
-  const [selectedProductId, setSelectedProductId] = useState("");
-  const [quantity, setQuantity] = useState(1);
-  const [detailedOrder, setDetailedOrder] = useState(null);
-  const [isPurchasing, setIsPurchasing] = useState(false);
 
-  // Notification States
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-
-  // Admin Users Directory State
+  // Profile & Admin Modals
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [usersList, setUsersList] = useState([]);
   const [isUsersModalOpen, setIsUsersModalOpen] = useState(false);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
 
+  // Global Alerts
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
   const isAdmin = user?.role === "admin";
 
-  // ---------------------------------------------------------------------
-  // 1. Lifecycle Effects
-  // ---------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Lifecycle Effects
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     fetchProducts();
+    fetchPaymentConfig();
+
+    // Register automatic session expiration interceptor
+    api.setSessionExpiredHandler(() => {
+      handleSessionExpired();
+    });
 
     const savedUser = localStorage.getItem("user");
     if (savedUser && token) {
-      const parsedUser = JSON.parse(savedUser);
-      setUser(parsedUser);
-      setProfileName(parsedUser.name);
-      setProfileEmail(parsedUser.email);
-      fetchOrders(token, parsedUser);
+      try {
+        const parsed = JSON.parse(savedUser);
+        setUser(parsed);
+        fetchOrders(token, parsed);
+        if (parsed.role === "admin") {
+          setCurrentPage("dashboard");
+          fetchUsersList(token);
+        }
+      } catch (err) {
+        handleLogout();
+      }
     }
   }, []);
 
-  // ---------------------------------------------------------------------
-  // 2. REST API Fetch Calls
-  // ---------------------------------------------------------------------
-
-  // [DATA TRAVEL FLOW - FETCH PRODUCTS]:
-  //   React Frontend (Browser) -> API Gateway (http://localhost:8010/products)
-  //   -> Reverse Proxy forwards to Product Service (http://127.0.0.1:8012/products)
-  //   -> Product Service reads MySQL (products_db.products) -> Returns JSON to Frontend
-  const fetchProducts = async (query = "") => {
+  const fetchUsersList = async (authToken) => {
     try {
-      const url = query.trim()
-        ? `${GATEWAY_URL}/products?q=${encodeURIComponent(query.trim())}`
-        : `${GATEWAY_URL}/products`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setProducts(data);
-        setSelectedProductId((prev) => {
-          if (prev && data.some((p) => p.id.toString() === prev)) {
-            return prev;
-          }
-          return data.length > 0 ? data[0].id.toString() : "";
-        });
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setError(data.detail || "Failed to load products.");
-      }
+      const data = await api.getAllUsers(authToken || token);
+      setUsersList(data);
     } catch (err) {
-      setError("Product Service is offline.");
+      // ignore
     }
   };
 
-  // [DATA TRAVEL FLOW - FETCH ORDERS]:
-  //   React Frontend (Browser, Bearer JWT) -> API Gateway (http://localhost:8010/orders)
-  //   -> Gateway validates token & scopes customer to user_id
-  //   -> Reverse Proxy forwards to Order Service (http://127.0.0.1:8013/orders)
-  //   -> Order Service reads MySQL (orders_db.orders) -> Returns JSON to Frontend
+  const fetchPaymentConfig = async () => {
+    try {
+      const cfg = await api.getPaymentConfig();
+      setPaymentConfig(cfg);
+    } catch (err) {
+      // ignore
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // API Fetchers
+  // ---------------------------------------------------------------------------
+  const fetchProducts = async (query = "") => {
+    try {
+      const data = await api.getProducts(query);
+      setProducts(data);
+    } catch (err) {
+      setError(err.message || "Failed to load products.");
+    }
+  };
+
   const fetchOrders = async (authToken, currentUser) => {
     try {
       const activeUser = currentUser || user;
-      // If admin, retrieve all orders; if customer, scope by user_id
-      const url =
-        activeUser?.role === "admin"
-          ? `${GATEWAY_URL}/orders`
-          : `${GATEWAY_URL}/orders?user_id=${activeUser?.id || ""}`;
-
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setOrders(data);
-      } else if (res.status === 401) {
-        const data = await res.json().catch(() => ({}));
-        handleSessionExpired(data.detail || "Access token is invalid or expired. Please log in again.");
-      }
+      const data = await api.getOrders(authToken, activeUser);
+      setOrders(data);
     } catch (err) {
-      setError("Order Service is offline.");
+      // Don't override main error if logged out
     }
   };
 
-  // Retrieve federated details for a specific order
-  const fetchOrderDetails = async (orderId) => {
-    setError("");
-    try {
-      const res = await fetch(`${GATEWAY_URL}/orders/${orderId}/details`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDetailedOrder(data);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 401) {
-          handleSessionExpired(data.detail || "Access token is invalid or expired. Please log in again.");
-        } else {
-          setError(data.detail || "Failed to fetch detailed order information.");
-        }
-      }
-    } catch (err) {
-      setError("Connection to Order Service lost.");
-    }
-  };
-
-  // Fetch all users list (Admin Only)
-  const fetchUsersList = async () => {
-    setIsLoadingUsers(true);
-    try {
-      const res = await fetch(`${GATEWAY_URL}/users`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUsersList(data);
-        setIsUsersModalOpen(true);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setError(data.detail || "Failed to fetch users directory.");
-      }
-    } catch (err) {
-      setError("User Service is offline.");
-    } finally {
-      setIsLoadingUsers(false);
-    }
-  };
-
-  // ---------------------------------------------------------------------
-  // 3. User & Auth Logic
-  // ---------------------------------------------------------------------
-
-  // [DATA TRAVEL FLOW - USER LOGIN]:
-  //   React Frontend (Browser) -> API Gateway (http://localhost:8010/auth/login)
-  //   -> User Service (http://127.0.0.1:8011/users/by-email?email=...) -> MySQL (users_db.users)
-  //   -> Gateway creates signed JWT -> Returns { access_token, user } to Frontend
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setError("");
-    setSuccess("");
-
-    try {
-      const res = await fetch(`${GATEWAY_URL}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.detail || "Login failed.");
-        return;
-      }
-
-      localStorage.setItem("token", data.access_token);
-      localStorage.setItem("user", JSON.stringify(data.user));
-
-      setToken(data.access_token);
-      setUser(data.user);
-      setProfileName(data.user.name);
-      setProfileEmail(data.user.email);
-      setSuccess(`Logged in successfully as ${data.user.name} (${(data.user.role || "customer").toUpperCase()})!`);
-
-      fetchOrders(data.access_token, data.user);
-    } catch (err) {
-      setError("API Gateway is offline.");
-    }
-  };
-
-  // [DATA TRAVEL FLOW - USER REGISTRATION]:
-  //   React Frontend (Browser) -> API Gateway (http://localhost:8010/auth/register)
-  //   -> User Service (http://127.0.0.1:8011/users/) -> MySQL (users_db.users)
-  //   -> Gateway creates signed JWT -> Returns { access_token, user } to Frontend
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    setError("");
-    setSuccess("");
-
-    try {
-      const res = await fetch(`${GATEWAY_URL}/auth/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: regName, email: regEmail, role: regRole }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.detail || "Registration failed.");
-        return;
-      }
-
-      localStorage.setItem("token", data.access_token);
-      localStorage.setItem("user", JSON.stringify(data.user));
-
-      setToken(data.access_token);
-      setUser(data.user);
-      setProfileName(data.user.name);
-      setProfileEmail(data.user.email);
-      setSuccess(`Account registered successfully as ${data.user.name} (${(data.user.role || "customer").toUpperCase()})!`);
-      setIsRegisterMode(false);
-      fetchOrders(data.access_token, data.user);
-    } catch (err) {
-      setError("API Gateway registration failed.");
-    }
-  };
-
-  const handleUpdateProfile = async (e) => {
-    e.preventDefault();
-    if (!user) return;
-    setError("");
-    setSuccess("");
-    setIsSavingProfile(true);
-
-    try {
-      const res = await fetch(`${GATEWAY_URL}/users/${user.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ name: profileName, email: profileEmail }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.detail || "Failed to update profile.");
-        setIsSavingProfile(false);
-        return;
-      }
-
-      setUser(data);
-      localStorage.setItem("user", JSON.stringify(data));
-      setSuccess("Profile updated successfully!");
-      setIsProfileModalOpen(false);
-    } catch (err) {
-      setError("Failed to communicate with User Service.");
-    } finally {
-      setIsSavingProfile(false);
-    }
-  };
-
-  const handleDeleteAccount = async () => {
-    if (!user) return;
-    const confirmed = window.confirm(
-      "Are you sure you want to permanently delete your account? All orders must be settled or cancelled first."
-    );
-    if (!confirmed) return;
-
-    setError("");
-    setSuccess("");
-
-    try {
-      const res = await fetch(`${GATEWAY_URL}/users/${user.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.detail || "Failed to delete account.");
-        return;
-      }
-
-      handleLogout();
-      setSuccess("Your account was successfully deleted.");
-    } catch (err) {
-      setError("Failed to delete account.");
-    }
-  };
-
-  const handleSessionExpired = (message = "Access token is invalid or expired. Please log in again.") => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    setToken("");
-    setUser(null);
-    setOrders([]);
-    setDetailedOrder(null);
-    setError(message);
-    setSuccess("");
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    setToken("");
-    setUser(null);
-    setOrders([]);
-    setDetailedOrder(null);
-    setIsProfileModalOpen(false);
-    setError("");
-    setSuccess("Logged out successfully.");
-  };
-
-  // ---------------------------------------------------------------------
-  // 4. Product CRUD Operations (ADMIN Only)
-  // ---------------------------------------------------------------------
-
+  // ---------------------------------------------------------------------------
+  // Search Handlers (Located in Sticky Navbar)
+  // ---------------------------------------------------------------------------
   const handleSearchSubmit = (e) => {
     e.preventDefault();
+    setCurrentPage("products");
     fetchProducts(searchQuery);
   };
 
@@ -348,791 +135,600 @@ function App() {
     fetchProducts("");
   };
 
+  // ---------------------------------------------------------------------------
+  // Authentication Handlers
+  // ---------------------------------------------------------------------------
+  const handleSessionExpired = () => {
+    setToken("");
+    setUser(null);
+    setOrders([]);
+    setCartItems([]);
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setError("Your session has expired. Please sign in with your email and password.");
+  };
+
+  const handleLogin = async (email, password) => {
+    setError("");
+    setSuccess("");
+    try {
+      const data = await api.loginUser(email, password);
+      setToken(data.access_token);
+      setUser(data.user);
+      localStorage.setItem("token", data.access_token);
+      localStorage.setItem("user", JSON.stringify(data.user));
+      setSuccess(`Welcome back, ${data.user.name}!`);
+      if (data.user.role === "admin") {
+        setCurrentPage("dashboard");
+        fetchUsersList(data.access_token);
+      } else {
+        setCurrentPage("products");
+      }
+      fetchOrders(data.access_token, data.user);
+    } catch (err) {
+      setError(err.message || "Invalid email or password.");
+    }
+  };
+
+  const handleRegister = async (payload) => {
+    setError("");
+    setSuccess("");
+    try {
+      const data = await api.registerUser(payload);
+      if (data && data.access_token) {
+        setToken(data.access_token);
+        setUser(data.user);
+        localStorage.setItem("token", data.access_token);
+        localStorage.setItem("user", JSON.stringify(data.user));
+        setSuccess(`Welcome to Dhee Stores, ${data.user.name}!`);
+        if (data.user.role === "admin") {
+          setCurrentPage("dashboard");
+          fetchUsersList(data.access_token);
+        } else {
+          setCurrentPage("products");
+        }
+        fetchOrders(data.access_token, data.user);
+      } else {
+        setSuccess("Account registered successfully! Logging you in...");
+        await handleLogin(payload.email, payload.password);
+      }
+    } catch (err) {
+      setError(err.message || "Registration failed.");
+    }
+  };
+
+  const handleLogout = () => {
+    setToken("");
+    setUser(null);
+    setOrders([]);
+    setCartItems([]);
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    setCurrentPage("products");
+    setError("");
+    setSuccess("Logged out successfully.");
+  };
+
+  // ---------------------------------------------------------------------------
+  // In-Card & Cart Quantity Management
+  // ---------------------------------------------------------------------------
+
+  // First-time "Add Product" click from card (Customer only)
+  const handleAddToCart = (product) => {
+    if (isAdmin) {
+      setError("Administrator accounts manage catalog and dashboard; customer accounts place purchases.");
+      return;
+    }
+    if (product.stock <= 0) return;
+
+    setCartItems((prev) => {
+      const existing = prev.find((item) => item.product.id === product.id);
+      if (existing) {
+        if (existing.quantity >= product.stock) {
+          setError(`Cannot add more "${product.name}". Max stock reached.`);
+          return prev;
+        }
+        return prev.map((item) =>
+          item.product.id === product.id
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        );
+      }
+      return [...prev, { product, quantity: 1 }];
+    });
+
+    setSuccess(`Added "${product.name}" to cart.`);
+  };
+
+  // Stepper quantity update [-] qty [+] (Customer only)
+  const handleUpdateQuantity = (productId, newQuantity) => {
+    if (isAdmin) return;
+    if (newQuantity <= 0) {
+      setCartItems((prev) => prev.filter((item) => item.product.id !== productId));
+      return;
+    }
+
+    setCartItems((prev) => {
+      const existing = prev.find((item) => item.product.id === productId);
+      if (existing) {
+        if (newQuantity > existing.product.stock) {
+          setError(`Cannot exceed available stock of ${existing.product.stock}.`);
+          return prev;
+        }
+        return prev.map((item) =>
+          item.product.id === productId ? { ...item, quantity: newQuantity } : item
+        );
+      } else {
+        const prod = products.find((p) => p.id === productId);
+        if (prod) {
+          return [...prev, { product: prod, quantity: newQuantity }];
+        }
+        return prev;
+      }
+    });
+  };
+
+  const handleClearCart = () => {
+    setCartItems([]);
+  };
+
+  // Multi-Item Checkout with COD or Razorpay
+  const handleCheckout = async (paymentMethod = "COD") => {
+    if (cartItems.length === 0 || isCheckingOut) return;
+    setIsCheckingOut(true);
+    setError("");
+    setSuccess("");
+
+    const totalAmount = cartItems.reduce(
+      (acc, item) => acc + item.product.price * item.quantity,
+      0
+    );
+
+    // -------------------------------------------------------------------------
+    // Option 1: Cash on Delivery (COD) Flow
+    // -------------------------------------------------------------------------
+    if (paymentMethod === "COD") {
+      try {
+        const payload = {
+          items: cartItems.map((i) => ({
+            product_id: i.product.id,
+            quantity: i.quantity,
+          })),
+          payment_method: "COD",
+        };
+
+        const placedOrders = await api.checkoutCart(payload, token);
+        setSuccess(
+          `Order confirmed with Cash on Delivery! ${placedOrders.length} item(s) placed successfully.`
+        );
+        setCartItems([]);
+        await fetchOrders(token, user);
+        await fetchProducts(searchQuery);
+        setCurrentPage("orders");
+      } catch (err) {
+        setError(err.message || "Cash on Delivery checkout failed.");
+      } finally {
+        setIsCheckingOut(false);
+      }
+      return;
+    }
+
+    // -------------------------------------------------------------------------
+    // Option 2: Razorpay Online Payment Flow
+    // -------------------------------------------------------------------------
+    if (paymentMethod === "RAZORPAY") {
+      try {
+        // Dynamically verify if keys are configured in backend .env
+        const cfg = await api.getPaymentConfig();
+        setPaymentConfig(cfg);
+
+        if (!cfg || !cfg.is_configured || !cfg.razorpay_key_id) {
+          setError(
+            "Razorpay credentials are not yet configured in your .env file. Please add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to .env, or select Cash on Delivery (COD) to complete your order."
+          );
+          setIsCheckingOut(false);
+          return;
+        }
+
+        // 1. Create official Razorpay Order via backend
+        const rzpOrder = await api.createRazorpayOrder(totalAmount, token);
+
+        // 2. Open standard Razorpay Checkout Modal
+        if (!window.Razorpay) {
+          throw new Error("Razorpay checkout SDK is not loaded. Please verify your connection.");
+        }
+
+        const options = {
+          key: rzpOrder.key_id,
+          amount: rzpOrder.amount,
+          currency: rzpOrder.currency || "INR",
+          name: "Dhee Stores",
+          description: `Checkout for ${cartItems.length} item(s)`,
+          image: "/logo.png",
+          order_id: rzpOrder.razorpay_order_id,
+          handler: async function (response) {
+            try {
+              setIsCheckingOut(true);
+              const verifyPayload = {
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                items: cartItems.map((i) => ({
+                  product_id: i.product.id,
+                  quantity: i.quantity,
+                })),
+              };
+
+              const confirmed = await api.verifyRazorpayPayment(verifyPayload, token);
+              setSuccess(
+                `Payment verified! Order #${confirmed.map((o) => o.id).join(", #")} confirmed via Razorpay (Payment ID: ${response.razorpay_payment_id}).`
+              );
+              setCartItems([]);
+              await fetchOrders(token, user);
+              await fetchProducts(searchQuery);
+              setCurrentPage("orders");
+            } catch (vErr) {
+              setError(vErr.message || "Payment verification failed.");
+            } finally {
+              setIsCheckingOut(false);
+            }
+          },
+          prefill: {
+            name: user?.name || "Customer",
+            email: user?.email || "customer@example.com",
+          },
+          theme: {
+            color: "#ea580c",
+          },
+          modal: {
+            ondismiss: function () {
+              setIsCheckingOut(false);
+            },
+          },
+        };
+
+        const rzpInstance = new window.Razorpay(options);
+        rzpInstance.on("payment.failed", function (resp) {
+          setIsCheckingOut(false);
+          setError(`Razorpay Payment Failed: ${resp.error?.description || "Transaction declined"}`);
+        });
+        rzpInstance.open();
+      } catch (err) {
+        setIsCheckingOut(false);
+        setError(err.message || "Failed to initiate Razorpay checkout.");
+      }
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Orders Management Handlers (Cancel function removed)
+  // ---------------------------------------------------------------------------
+  const handleDeleteOrderRecord = async (orderIds) => {
+    if (!isAdmin) return;
+    const ids = Array.isArray(orderIds) ? orderIds : [orderIds];
+    const confirmed = window.confirm(`Permanently delete Order #${ids.join(", #")} record(s)?`);
+    if (!confirmed) return;
+
+    try {
+      for (const id of ids) {
+        await api.deleteOrder(id, token);
+      }
+      setSuccess(`Order #${ids.join(", #")} record(s) deleted.`);
+      fetchOrders(token, user);
+      fetchProducts(searchQuery);
+    } catch (err) {
+      setError(err.message || "Failed to delete order.");
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Product CRUD Handlers (Admin)
+  // ---------------------------------------------------------------------------
   const openAddProductModal = () => {
-    setProductForm({ name: "", price: "", stock: "" });
-    setIsAddProductModalOpen(true);
+    setEditingProduct(null);
+    setIsProductModalOpen(true);
   };
 
   const openEditProductModal = (prod) => {
     setEditingProduct(prod);
-    setProductForm({ name: prod.name, price: prod.price.toString(), stock: prod.stock.toString() });
+    setIsProductModalOpen(true);
   };
 
-  const handleSaveProduct = async (e) => {
-    e.preventDefault();
-    if (!isAdmin) {
-      setError("Permission denied: Admin role required to create or edit products.");
-      return;
-    }
-
+  const handleSaveProduct = async (payload) => {
+    if (!isAdmin) return;
+    setIsSavingProduct(true);
     setError("");
     setSuccess("");
-    setIsSavingProduct(true);
-
-    const payload = {
-      name: productForm.name.trim(),
-      price: parseFloat(productForm.price),
-      stock: parseInt(productForm.stock),
-    };
-
-    if (isNaN(payload.price) || payload.price <= 0) {
-      setError("Product price must be greater than 0.");
-      setIsSavingProduct(false);
-      return;
-    }
-    if (isNaN(payload.stock) || payload.stock < 0) {
-      setError("Product stock cannot be negative.");
-      setIsSavingProduct(false);
-      return;
-    }
 
     try {
       const isEdit = !!editingProduct;
-      const url = isEdit ? `${GATEWAY_URL}/products/${editingProduct.id}` : `${GATEWAY_URL}/products`;
-      const method = isEdit ? "PUT" : "POST";
-
-      const res = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.detail || `Failed to ${isEdit ? "update" : "create"} product.`);
-        setIsSavingProduct(false);
-        return;
+      if (isEdit) {
+        await api.updateProduct(editingProduct.id, payload, token);
+        setSuccess(`Product "${payload.name}" updated successfully!`);
+      } else {
+        await api.createProduct(payload, token);
+        setSuccess(`Product "${payload.name}" created successfully!`);
       }
-
-      setSuccess(`Product "${data.name}" ${isEdit ? "updated" : "created"} successfully!`);
-      setIsAddProductModalOpen(false);
+      setIsProductModalOpen(false);
       setEditingProduct(null);
       await fetchProducts(searchQuery);
     } catch (err) {
-      setError("Product Service connection failed.");
+      setError(err.message || "Failed to save product.");
     } finally {
       setIsSavingProduct(false);
     }
   };
 
-  const handleDeleteProduct = async (prod) => {
-    if (!isAdmin) {
-      setError("Permission denied: Admin role required to delete products.");
+  const handleToggleBlockProduct = async (prod) => {
+    if (!isAdmin) return;
+    const action = prod.is_blocked ? "unblock" : "block";
+    const confirmed = window.confirm(`Are you sure you want to ${action} product "${prod.name}"?`);
+    if (!confirmed) return;
+
+    try {
+      await api.toggleBlockProduct(prod.id, token);
+      setSuccess(`Product "${prod.name}" ${action}ed successfully.`);
+      await fetchProducts(searchQuery);
+    } catch (err) {
+      setError(err.message || `Failed to ${action} product.`);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Profile & User Directory Handlers
+  // ---------------------------------------------------------------------------
+  const handleSaveProfile = async (payload) => {
+    setIsSavingProfile(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const updated = await api.updateProfile(user.id, payload, token);
+      setUser(updated);
+      localStorage.setItem("user", JSON.stringify(updated));
+      setSuccess("Profile updated successfully!");
+      setIsProfileModalOpen(false);
+    } catch (err) {
+      setError(err.message || "Failed to update profile.");
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const handleOpenUsersDirectory = async () => {
+    setIsUsersModalOpen(true);
+    setIsLoadingUsers(true);
+    try {
+      const data = await api.getAllUsers(token);
+      setUsersList(data);
+    } catch (err) {
+      setError(err.message || "Failed to load users directory.");
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  const handleToggleBlockUser = async (u) => {
+    if (!isAdmin) return;
+    if (u.id === user.id) {
+      setError("You cannot block your own administrator account.");
       return;
     }
-
-    const confirmed = window.confirm(`Are you sure you want to delete product "${prod.name}"?`);
+    const action = u.is_blocked ? "unblock" : "block";
+    const confirmed = window.confirm(`Are you sure you want to ${action} user "${u.name}" (${u.email})?`);
     if (!confirmed) return;
 
-    setError("");
-    setSuccess("");
-
     try {
-      const res = await fetch(`${GATEWAY_URL}/products/${prod.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.detail || "Cannot delete product.");
-        return;
-      }
-
-      setSuccess(`Product "${prod.name}" deleted successfully.`);
-      await fetchProducts(searchQuery);
+      await api.toggleBlockUser(u.id, token);
+      setSuccess(`User "${u.name}" ${action}ed successfully.`);
+      const data = await api.getAllUsers(token);
+      setUsersList(data);
     } catch (err) {
-      setError("Failed to delete product.");
+      setError(err.message || `Failed to ${action} user.`);
     }
   };
 
-  // ---------------------------------------------------------------------
-  // 5. Order Operations (Purchase & Lifecycle)
-  // ---------------------------------------------------------------------
+  // Total items currently in cart
+  const totalCartCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
 
-  // [DATA TRAVEL FLOW - PLACE ORDER (DISTRIBUTED SAGA)]:
-  //   1. React Frontend (Browser, Bearer JWT) -> API Gateway (http://localhost:8010/orders)
-  //   2. Gateway verifies JWT, injects user_id -> Order Service (http://127.0.0.1:8013/orders)
-  //   3. Order Service coordinates 3 distributed calls:
-  //      - Calls User Service (http://127.0.0.1:8011/users/{user_id}) -> asserts user exists
-  //      - Calls Product Service (http://127.0.0.1:8012/products/{product_id}) -> verifies stock
-  //      - Calls Product Service (PUT .../reduce-stock) -> atomically deducts inventory
-  //   4. Order Service writes order to MySQL (orders_db.orders) -> Returns confirmed Order to Frontend
-  const handlePlaceOrder = async (e) => {
-    e.preventDefault();
-    if (isPurchasing) return;
-
-    setError("");
-    setSuccess("");
-    setIsPurchasing(true);
-
-    try {
-      const res = await fetch(`${GATEWAY_URL}/orders`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          product_id: parseInt(selectedProductId),
-          quantity: parseInt(quantity),
-          user_id: user.id,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        if (res.status === 401) {
-          handleSessionExpired(data.detail || "Access token is invalid or expired. Please log in again.");
-        } else {
-          setError(data.detail || "Failed to place order.");
-        }
-        setIsPurchasing(false);
-        return;
-      }
-
-      setSuccess(`Order #${data.id} placed successfully! Total cost: ₹${data.total_price}`);
-      await fetchProducts(searchQuery);
-      await fetchOrders(token, user);
-    } catch (err) {
-      setError("Transaction gateway offline.");
-    } finally {
-      setIsPurchasing(false);
-    }
-  };
-
-  const handleCancelOrder = async (orderId) => {
-    const confirmed = window.confirm(`Are you sure you want to cancel Order #${orderId}? Stock will be restored.`);
-    if (!confirmed) return;
-
-    setError("");
-    setSuccess("");
-
-    try {
-      const res = await fetch(`${GATEWAY_URL}/orders/${orderId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ status: "CANCELLED" }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.detail || "Failed to cancel order.");
-        return;
-      }
-
-      setSuccess(`Order #${orderId} was cancelled. Inventory restored.`);
-      await fetchProducts(searchQuery);
-      await fetchOrders(token, user);
-      if (detailedOrder && detailedOrder.id === orderId) {
-        fetchOrderDetails(orderId);
-      }
-    } catch (err) {
-      setError("Failed to cancel order.");
-    }
-  };
-
-  const handleDeleteOrder = async (orderId) => {
-    const confirmed = window.confirm(`Are you sure you want to delete Order #${orderId} record permanently?`);
-    if (!confirmed) return;
-
-    setError("");
-    setSuccess("");
-
-    try {
-      const res = await fetch(`${GATEWAY_URL}/orders/${orderId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.detail || "Failed to delete order.");
-        return;
-      }
-
-      setSuccess(`Order #${orderId} deleted successfully.`);
-      if (detailedOrder && detailedOrder.id === orderId) {
-        setDetailedOrder(null);
-      }
-      await fetchProducts(searchQuery);
-      await fetchOrders(token, user);
-    } catch (err) {
-      setError("Failed to delete order.");
-    }
-  };
-
-  // ---------------------------------------------------------------------
-  // 6. JSX Render View
-  // ---------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Render Application
+  // ---------------------------------------------------------------------------
   return (
-    <div>
-      {/* Top Header / User Bar */}
-      <div className="user-bar">
-        <h2>🛍️ Marketplace Microservices</h2>
-        {user ? (
-          <div className="action-btn-group">
-            <span>
-              Welcome, ({user.email})
-              <span className={`role-badge ${user.role || "customer"}`}>
-                {(user.role || "customer").toUpperCase()}
-              </span>
-            </span>
-            {isAdmin && (
-              <button className="secondary sm" onClick={fetchUsersList} disabled={isLoadingUsers}>
-                {isLoadingUsers ? "Loading..." : "👥 Users Directory"}
-              </button>
-            )}
-            <button className="secondary sm" onClick={() => setIsProfileModalOpen(true)}>
-              ⚙️ Profile
-            </button>
-            <button className="secondary sm" onClick={handleLogout}>
-              Log Out
-            </button>
-          </div>
-        ) : (
-          <span>Please log in to browse and make purchases.</span>
-        )}
-      </div>
-
-      {/* Global Alerts */}
-      {error && <div className="alert-error">{error}</div>}
-      {success && <div className="alert-success">{success}</div>}
-
-      {/* Auth Screen (Login / Register Switch) */}
-      {!user && (
-        <div className="card" style={{ maxWidth: "450px", margin: "2rem auto" }}>
-          {!isRegisterMode ? (
-            <form onSubmit={handleLogin}>
-              <h3>Sign In</h3>
-              <div className="form-group">
-                <label>Email Address</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. user@gmail.com"
-                  required
-                />
-              </div>
-              <button type="submit" style={{ width: "100%" }}>
-                Login
-              </button>
-
-              <div
-                style={{
-                  marginTop: "1.25rem",
-                  padding: "0.85rem",
-                  background: "#f8fafc",
-                  border: "1px solid #e2e8f0",
-                  borderRadius: "8px",
-                  fontSize: "0.82rem",
-                  lineHeight: "1.5",
-                  color: "#334155",
-                }}
-              >
-                <div style={{ fontWeight: "700", color: "#0d9488", marginBottom: "0.35rem" }}>
-                  Demo Accounts:
-                </div>
-                <div>• <strong>Admin:</strong> <code>admin@gmail.com</code> (Full Product CRUD)</div>
-                <div>• <strong>Customer:</strong> <code>customer@gmail.com</code> (Purchase Only)</div>
-              </div>
-
-              <p style={{ textAlign: "center", marginTop: "1rem", fontSize: "0.85rem", color: "#64748b" }}>
-                Don't have an account?{" "}
-                <a href="#" onClick={() => setIsRegisterMode(true)} style={{ color: "#0d9488", fontWeight: "600" }}>
-                  Register here
-                </a>
-              </p>
-            </form>
-          ) : (
-            <form onSubmit={handleRegister}>
-              <h3>Register New Account</h3>
-              <div className="form-group">
-                <label>Full Name</label>
-                <input
-                  type="text"
-                  value={regName}
-                  onChange={(e) => setRegName(e.target.value)}
-                  placeholder="e.g. User Name"
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Email Address</label>
-                <input
-                  type="email"
-                  value={regEmail}
-                  onChange={(e) => setRegEmail(e.target.value)}
-                  placeholder="e.g. user@gmail.com"
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Select Role</label>
-                <select value={regRole} onChange={(e) => setRegRole(e.target.value)}>
-                  <option value="customer">Customer (Can Browse & Purchase Only)</option>
-                  <option value="admin">Admin (Full Product CRUD & Inventory Control)</option>
-                </select>
-              </div>
-              <button type="submit" style={{ width: "100%" }}>
-                Sign Up
-              </button>
-              <p style={{ textAlign: "center", marginTop: "1rem", fontSize: "0.85rem", color: "#64748b" }}>
-                Already registered?{" "}
-                <a href="#" onClick={() => setIsRegisterMode(false)} style={{ color: "#0d9488", fontWeight: "600" }}>
-                  Login here
-                </a>
-              </p>
-            </form>
-          )}
-        </div>
+    <div className="app-layout">
+      {/* Sticky Top Navigation Bar with active page tab indicators */}
+      {user && (
+        <Navbar
+          user={user}
+          activePage={currentPage}
+          onNavigate={setCurrentPage}
+          cartCount={totalCartCount}
+          ordersCount={orders.length}
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          onSearchSubmit={handleSearchSubmit}
+          onClearSearch={handleClearSearch}
+          onOpenProfile={() => setIsProfileModalOpen(true)}
+          onOpenUsers={handleOpenUsersDirectory}
+          onLogout={handleLogout}
+        />
       )}
 
-      {/* Main Dashboard (Protected View) */}
-      {user && (
-        <div className="dashboard-grid">
-          {/* Left Column: Product Catalog & Placement */}
+      {/* Main Content Area */}
+      <main className="main-content-container">
+        {/* Global Notifications for Logged-In User Pages */}
+        {user && error && (
+          <div className="alert-error" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>⚠️ {error}</span>
+            <button
+              type="button"
+              className="alert-dismiss-btn"
+              onClick={() => setError("")}
+              title="Dismiss error"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        {user && success && (
+          <div className="alert-success" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>✅ {success}</span>
+            <button
+              type="button"
+              className="alert-dismiss-btn"
+              onClick={() => setSuccess("")}
+              title="Dismiss notification"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Auth Screen (When Logged Out) */}
+        {!user ? (
+          <AuthScreen
+            onLogin={handleLogin}
+            onRegister={handleRegister}
+            error={error}
+            success={success}
+            onClearMessages={() => {
+              setError("");
+              setSuccess("");
+            }}
+          />
+        ) : currentPage === "dashboard" && isAdmin ? (
+          /* Dedicated Admin Sales & Business Analytics Dashboard */
+          <AdminDashboard
+            orders={orders}
+            products={products}
+            usersList={usersList}
+            onOpenAddProduct={openAddProductModal}
+            onOpenUsers={handleOpenUsersDirectory}
+            onNavigateToCatalog={() => setCurrentPage("products")}
+          />
+        ) : currentPage === "cart" && !isAdmin ? (
+          /* Dedicated Shopping Cart Page (Customers only; Admins oversee dashboard) */
+          <CartPage
+            cartItems={cartItems}
+            onUpdateQuantity={handleUpdateQuantity}
+            onRemoveItem={(prodId) => handleUpdateQuantity(prodId, 0)}
+            onClearCart={handleClearCart}
+            onCheckout={handleCheckout}
+            isCheckingOut={isCheckingOut}
+            onNavigateToProducts={() => setCurrentPage("products")}
+            paymentConfig={paymentConfig}
+          />
+        ) : currentPage === "orders" ? (
+          /* Dedicated Platform Orders / Customer Orders Page */
+          <OrdersPage
+            orders={orders}
+            products={products}
+            isAdmin={isAdmin}
+            onNavigateToProducts={() => setCurrentPage("products")}
+            onDeleteOrderRecord={handleDeleteOrderRecord}
+          />
+        ) : (
+          /* Dedicated Product Catalog Page */
           <div>
-            <div className="card">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-                <h3 style={{ margin: 0 }}>
-                  📦 Products Inventory Catalog {isAdmin && <span className="role-badge admin">ADMIN MODE</span>}
-                </h3>
-                {/* Admin-only: Add Product Button */}
+            {/* Catalog Header Bar */}
+            <div className="catalog-header-bar">
+              <div>
+                <h2 style={{ margin: 0 }}>🛍️ Product Catalog</h2>
+                <p style={{ margin: "0.25rem 0 0 0", color: "#64748b", fontSize: "0.9rem" }}>
+                  {isAdmin
+                    ? "Manage platform items, edit prices, update inventory stocks, and monitor catalog."
+                    : "Add products directly from the cards with live quantity steppers."}
+                </p>
+              </div>
+
+              <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
                 {isAdmin && (
-                  <button className="sm" onClick={openAddProductModal}>
-                    ➕ Add New Product
+                  <>
+                    <button type="button" className="sm" onClick={openAddProductModal}>
+                      ➕ Add Product
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary sm"
+                      onClick={() => setCurrentPage("dashboard")}
+                    >
+                      📊 View Dashboard
+                    </button>
+                  </>
+                )}
+                {!isAdmin && totalCartCount > 0 && (
+                  <button
+                    type="button"
+                    className="cart-checkout-btn sm"
+                    onClick={() => setCurrentPage("cart")}
+                  >
+                    View Cart ({formatNumber(totalCartCount)}) →
                   </button>
                 )}
               </div>
+            </div>
 
-              {/* Product Search Bar */}
-              <form onSubmit={handleSearchSubmit} className="search-container">
-                <input
-                  type="text"
-                  placeholder="Search products by name..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  style={{ flex: 1 }}
-                />
-                <button type="submit" className="sm">Search</button>
+            {/* Product Card Grid */}
+            {products.length === 0 ? (
+              <div className="card" style={{ textAlign: "center", padding: "3rem" }}>
+                <span style={{ fontSize: "3rem" }}>📦</span>
+                <h3>No products found</h3>
+                <p style={{ color: "#64748b" }}>
+                  {searchQuery ? `No results for "${searchQuery}".` : "The catalog is currently empty."}
+                </p>
                 {searchQuery && (
                   <button type="button" className="secondary sm" onClick={handleClearSearch}>
-                    Clear
+                    Clear Search
                   </button>
                 )}
-              </form>
-
-              {products.length === 0 ? (
-                <p style={{ color: "#64748b", fontSize: "0.9rem" }}>No products found.</p>
-              ) : (
-                <ul className="item-list">
-                  {products.map((prod) => (
-                    <li key={prod.id}>
-                      <div>
-                        <strong style={{ color: "#0f172a" }}>{prod.name}</strong>
-                        <div style={{ fontSize: "0.85rem", color: "#0d9488", fontWeight: "600" }}>Unit Price: ₹{prod.price}</div>
-                        <div>
-                          {prod.stock > 0 ? (
-                            <span style={{ color: "#16a34a", fontSize: "0.85rem", fontWeight: "600" }}>In Stock: {prod.stock}</span>
-                          ) : (
-                            <span style={{ color: "#dc2626", fontSize: "0.85rem", fontWeight: "600" }}>Out of Stock</span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Admin-only: Edit and Delete Buttons */}
-                      {isAdmin && (
-                        <div className="action-btn-group">
-                          <button className="secondary sm" onClick={() => openEditProductModal(prod)}>
-                            ✏️ Edit
-                          </button>
-                          <button className="secondary-danger sm" onClick={() => handleDeleteProduct(prod)}>
-                            🗑️ Delete
-                          </button>
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {/* Place Order Card (Available to Customer for Purchasing) */}
-            <div className="card">
-              <h3>🛒 Place a New Purchase Order</h3>
-              <form onSubmit={handlePlaceOrder}>
-                <div style={{ display: "flex", gap: "1rem", alignItems: "flex-end" }}>
-                  <div className="form-group" style={{ flex: 2 }}>
-                    <label>Select Product</label>
-                    <select
-                      value={selectedProductId}
-                      onChange={(e) => setSelectedProductId(e.target.value)}
-                    >
-                      {products.map((prod) => (
-                        <option key={prod.id} value={prod.id} disabled={prod.stock === 0}>
-                          {prod.name} (₹{prod.price}) {prod.stock === 0 ? "- Out of stock" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group" style={{ flex: 1 }}>
-                    <label>Quantity</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={quantity}
-                      onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-                      required
+              </div>
+            ) : (
+              <div className="product-card-grid">
+                {products.map((prod) => {
+                  const cartItem = cartItems.find((i) => i.product.id === prod.id);
+                  return (
+                    <ProductCard
+                      key={prod.id}
+                      product={prod}
+                      isAdmin={isAdmin}
+                      onAddToCart={handleAddToCart}
+                      onUpdateQuantity={handleUpdateQuantity}
+                      cartQuantity={cartItem?.quantity || 0}
+                      onEdit={openEditProductModal}
+                      onToggleBlock={handleToggleBlockProduct}
                     />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={
-                      isPurchasing ||
-                      !selectedProductId ||
-                      products.find((p) => p.id === parseInt(selectedProductId))?.stock === 0
-                    }
-                    style={{ height: "48px", padding: "0 2rem" }}
-                  >
-                    {isPurchasing ? "Processing..." : "Purchase"}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-
-          {/* Right Column: Order History & Details */}
-          <div>
-            <div className="card">
-              <h3>
-                📜 {isAdmin ? "All Platform Orders (Admin View)" : "My Order History (Customer View)"}
-              </h3>
-              {orders.length === 0 ? (
-                <p style={{ color: "#64748b", fontSize: "0.9rem" }}>No orders placed yet.</p>
-              ) : (
-                <ul className="item-list">
-                  {orders.map((ord) => {
-                    const statusClass =
-                      ord.status?.toLowerCase() === "cancelled"
-                        ? "cancelled"
-                        : ord.status?.toLowerCase() === "pending"
-                        ? "pending"
-                        : "completed";
-                    return (
-                      <li key={ord.id} style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            width: "100%",
-                            cursor: "pointer",
-                          }}
-                          onClick={() => fetchOrderDetails(ord.id)}
-                        >
-                          <div>
-                            <strong style={{ color: "#0f172a" }}>Order #{ord.id}</strong> (User #{ord.user_id} | Product #{ord.product_id})
-                            <div style={{ fontSize: "0.8rem", color: "#64748b" }}>
-                              Qty: {ord.quantity} | Total: ₹{ord.total_price}
-                            </div>
-                          </div>
-                          <span className={`status-badge ${statusClass}`}>{ord.status}</span>
-                        </div>
-                        <div className="action-btn-group" style={{ alignSelf: "flex-end" }}>
-                          {ord.status?.toUpperCase() !== "CANCELLED" && (
-                            <button
-                              className="secondary sm"
-                              style={{ borderColor: "#fde68a", color: "#b45309", background: "#fef3c7" }}
-                              onClick={() => handleCancelOrder(ord.id)}
-                            >
-                              Cancel
-                            </button>
-                          )}
-                          {isAdmin && (
-                            <button
-                              className="secondary-danger sm"
-                              onClick={() => handleDeleteOrder(ord.id)}
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-
-            {/* Aggregated Federated Details Card */}
-            {detailedOrder && (
-              <div className="card" style={{ borderColor: "#0d9488", boxShadow: "0 10px 25px -5px rgba(13, 148, 136, 0.15)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <h3 style={{ margin: 0, color: "#0f172a" }}>🔍 Order #{detailedOrder.id} Details</h3>
-                  <button className="secondary sm" onClick={() => setDetailedOrder(null)}>
-                    ✕ Close
-                  </button>
-                </div>
-                <div style={{ fontSize: "0.9rem", display: "grid", gap: "0.5rem", marginTop: "1rem" }}>
-                  <div>
-                    <span style={{ color: "#0d9488", fontWeight: "bold" }}>Status:</span>{" "}
-                    <span
-                      className={`status-badge ${
-                        detailedOrder.status?.toLowerCase() === "cancelled"
-                          ? "cancelled"
-                          : detailedOrder.status?.toLowerCase() === "pending"
-                          ? "pending"
-                          : "completed"
-                      }`}
-                    >
-                      {detailedOrder.status}
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ color: "#0d9488", fontWeight: "bold" }}>Quantity Ordered:</span>{" "}
-                    {detailedOrder.quantity}
-                  </div>
-                  <div>
-                    <span style={{ color: "#0d9488", fontWeight: "bold" }}>Total Cost:</span> ₹
-                    {detailedOrder.total_price}
-                  </div>
-
-                  <hr style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: "0.5rem 0" }} />
-
-                  {/* Customer Details */}
-                  {detailedOrder.user_details ? (
-                    <div>
-                      <strong style={{ color: "#0f172a" }}>👤 Customer Profile Details:</strong>
-                      <div style={{ paddingLeft: "0.5rem", marginTop: "0.25rem", color: "#334155" }}>
-                        Name: {detailedOrder.user_details.name} <br />
-                        Email: {detailedOrder.user_details.email}
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ color: "#dc2626" }}>Failed to retrieve customer profiles.</div>
-                  )}
-
-                  {/* Product Details */}
-                  {detailedOrder.product_details ? (
-                    <div style={{ marginTop: "0.5rem" }}>
-                      <strong style={{ color: "#0f172a" }}>📦 Product Catalog Details:</strong>
-                      <div style={{ paddingLeft: "0.5rem", marginTop: "0.25rem", color: "#334155" }}>
-                        Product: {detailedOrder.product_details.name} <br />
-                        Catalog Price: ₹{detailedOrder.product_details.price}
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ color: "#dc2626" }}>Failed to retrieve product details.</div>
-                  )}
-                </div>
+                  );
+                })}
               </div>
             )}
           </div>
-        </div>
-      )}
+        )}
+      </main>
 
-      {/* User Profile Modal (User CRUD - Edit Profile / Delete Account) */}
-      {isProfileModalOpen && (
-        <div className="modal-backdrop" onClick={() => setIsProfileModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3>⚙️ Manage Account Profile</h3>
-            <form onSubmit={handleUpdateProfile}>
-              <div className="form-group">
-                <label>User ID</label>
-                <input type="text" value={user?.id || ""} disabled style={{ opacity: 0.6 }} />
-              </div>
-              <div className="form-group">
-                <label>Assigned Role</label>
-                <input type="text" value={(user?.role || "customer").toUpperCase()} disabled style={{ opacity: 0.6 }} />
-              </div>
-              <div className="form-group">
-                <label>Full Name</label>
-                <input
-                  type="text"
-                  value={profileName}
-                  onChange={(e) => setProfileName(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Email Address</label>
-                <input
-                  type="email"
-                  value={profileEmail}
-                  onChange={(e) => setProfileEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="action-btn-group" style={{ marginTop: "1.5rem", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <button type="submit" disabled={isSavingProfile}>
-                    {isSavingProfile ? "Saving..." : "Save Changes"}
-                  </button>
-                  <button type="button" className="secondary" onClick={() => setIsProfileModalOpen(false)}>
-                    Cancel
-                  </button>
-                </div>
-                <button type="button" className="danger sm" onClick={handleDeleteAccount}>
-                  Delete Account
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Admin / Account Modals */}
+      <ProductModal
+        isOpen={isProductModalOpen}
+        onClose={() => setIsProductModalOpen(false)}
+        editingProduct={editingProduct}
+        onSave={handleSaveProduct}
+        isSaving={isSavingProduct}
+      />
 
-      {/* Add Product Modal (Product CRUD - Create - ADMIN ONLY) */}
-      {isAddProductModalOpen && isAdmin && (
-        <div className="modal-backdrop" onClick={() => setIsAddProductModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3>➕ Add New Product (Admin)</h3>
-            <form onSubmit={handleSaveProduct}>
-              <div className="form-group">
-                <label>Product Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Wireless Mouse"
-                  value={productForm.name}
-                  onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Price (₹)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  placeholder="e.g. 799.00"
-                  value={productForm.price}
-                  onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Initial Stock Quantity</label>
-                <input
-                  type="number"
-                  min="0"
-                  placeholder="e.g. 25"
-                  value={productForm.stock}
-                  onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="action-btn-group" style={{ marginTop: "1.5rem" }}>
-                <button type="submit" disabled={isSavingProduct}>
-                  {isSavingProduct ? "Creating..." : "Create Product"}
-                </button>
-                <button type="button" className="secondary" onClick={() => setIsAddProductModalOpen(false)}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <ProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        currentUser={user}
+        onSave={handleSaveProfile}
+        isSaving={isSavingProfile}
+      />
 
-      {/* Edit Product Modal (Product CRUD - Update - ADMIN ONLY) */}
-      {editingProduct && isAdmin && (
-        <div className="modal-backdrop" onClick={() => setEditingProduct(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h3>✏️ Edit Product #{editingProduct.id} (Admin)</h3>
-            <form onSubmit={handleSaveProduct}>
-              <div className="form-group">
-                <label>Product Name</label>
-                <input
-                  type="text"
-                  value={productForm.name}
-                  onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Price (₹)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  value={productForm.price}
-                  onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Stock Quantity (Reduce / Restock)</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={productForm.stock}
-                  onChange={(e) => setProductForm({ ...productForm, stock: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="action-btn-group" style={{ marginTop: "1.5rem" }}>
-                <button type="submit" disabled={isSavingProduct}>
-                  {isSavingProduct ? "Saving..." : "Save Changes"}
-                </button>
-                <button type="button" className="secondary" onClick={() => setEditingProduct(null)}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-      {/* Admin Users Directory Modal (Shows Role Column) */}
-      {isUsersModalOpen && isAdmin && (
-        <div className="modal-backdrop" onClick={() => setIsUsersModalOpen(false)}>
-          <div className="modal-content" style={{ maxWidth: "750px" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ margin: 0 }}>👥 Registered Users Directory</h3>
-              <button className="secondary sm" onClick={() => setIsUsersModalOpen(false)}>
-                ✕ Close
-              </button>
-            </div>
-            <p style={{ color: "#64748b", fontSize: "0.85rem", marginTop: "0.5rem" }}>
-              Live accounts stored in MySQL <code>users_db.users</code> table showing assigned roles.
-            </p>
-            <div style={{ overflowX: "auto", maxHeight: "400px" }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Full Name</th>
-                    <th>Email Address</th>
-                    <th>Assigned Role</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {usersList.map((u) => (
-                    <tr key={u.id}>
-                      <td>#{u.id}</td>
-                      <td><strong>{u.name}</strong></td>
-                      <td>{u.email}</td>
-                      <td>
-                        <span className={`role-badge ${u.role || "customer"}`}>
-                          {(u.role || "customer").toUpperCase()}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
+      <UsersModal
+        isOpen={isUsersModalOpen}
+        onClose={() => setIsUsersModalOpen(false)}
+        usersList={usersList}
+        isLoading={isLoadingUsers}
+        onToggleBlockUser={handleToggleBlockUser}
+      />
     </div>
   );
 }
-
-export default App;

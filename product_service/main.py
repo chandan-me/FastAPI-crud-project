@@ -3,6 +3,7 @@ import httpx
 from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 try:
     from . import models, schemas, database
@@ -26,21 +27,67 @@ app = FastAPI(title="Product Service", description="Product Catalog Microservice
 # Auto-create table definitions in MySQL (products_db)
 models.Base.metadata.create_all(bind=database.engine)
 
+# Auto-migrate image_url and is_blocked columns if missing in existing database table
+try:
+    with database.engine.connect() as conn:
+        col_img = conn.execute(text("SHOW COLUMNS FROM products LIKE 'image_url'"))
+        if not col_img.fetchone():
+            conn.execute(text("ALTER TABLE products ADD COLUMN image_url TEXT NULL"))
+            conn.commit()
+
+        col_blk = conn.execute(text("SHOW COLUMNS FROM products LIKE 'is_blocked'"))
+        if not col_blk.fetchone():
+            conn.execute(text("ALTER TABLE products ADD COLUMN is_blocked TINYINT(1) NOT NULL DEFAULT 0"))
+            conn.commit()
+except Exception:
+    pass
+
+# Auto-seed default products if catalog is empty
+def auto_seed_products():
+    try:
+        with database.SessionLocal() as session:
+            count = session.query(models.Product).count()
+            if count == 0:
+                defaults = [
+                    models.Product(name="Smart Watch Series 5", price=89.99, stock=25, image_url="https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&h=600&q=80"),
+                    models.Product(name="Wireless Headphones", price=59.99, stock=40, image_url="https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=600&h=600&q=80"),
+                    models.Product(name="Travel Backpack", price=39.99, stock=30, image_url="https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=600&h=600&q=80"),
+                    models.Product(name="Running Shoes", price=49.99, stock=20, image_url="https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=600&h=600&q=80"),
+                    models.Product(name="Luxury Perfume", price=29.99, stock=15, image_url="https://images.unsplash.com/photo-1523293182086-7651a899d37f?auto=format&fit=crop&w=600&h=600&q=80"),
+                    models.Product(name="Mechanical Gaming Keyboard", price=79.99, stock=18, image_url="https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?auto=format&fit=crop&w=600&h=600&q=80"),
+                    models.Product(name="Ergonomic Wireless Mouse", price=24.99, stock=35, image_url="https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?auto=format&fit=crop&w=600&h=600&q=80"),
+                    models.Product(name="Pro Gaming Laptop", price=1099.99, stock=10, image_url="https://images.unsplash.com/photo-1496181133206-80ce9b88a853?auto=format&fit=crop&w=600&h=600&q=80"),
+                    models.Product(name="Studio Desk Microphone", price=64.99, stock=18, image_url="https://images.unsplash.com/photo-1590658268037-6bf12165a8df?auto=format&fit=crop&w=600&h=600&q=80"),
+                    models.Product(name="4K Ultra HD Webcam", price=49.99, stock=30, image_url="https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=600&h=600&q=80"),
+                ]
+                session.add_all(defaults)
+                session.commit()
+    except Exception as e:
+        print(f"Product auto-seed notice: {e}")
+
+auto_seed_products()
+
 ORDER_SERVICE_URL = os.getenv("ORDER_SERVICE_URL", "http://127.0.0.1:8013")
 
 
 # ==============================================================================
 # [DATA TRAVEL FLOW - CREATE PRODUCT]:
 #   Origin:      Admin in React Frontend -> API Gateway (POST /products, RBAC checked) -> Product Service (POST /products)
-#   Payload:     { name: str, price: float, stock: int }
-#   Database:    INSERT INTO products_db.products (name, price, stock) VALUES (...)
+#   Payload:     { name: str, price: float, stock: int, image_url: Optional[str] }
+#   Database:    INSERT INTO products_db.products (name, price, stock, image_url) VALUES (...)
 #   Destination: Returns created Product object with autoincremented ID back to API Gateway -> Frontend.
 # ==============================================================================
 @app.post("/products", response_model=schemas.Product, status_code=status.HTTP_201_CREATED)
 @app.post("/products/", response_model=schemas.Product, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_product(product: schemas.ProductCreate, db: Session = Depends(database.get_db)):
     """Create a new product in the catalog."""
-    db_product = models.Product(name=product.name, price=product.price, stock=product.stock)
+    db_product = models.Product(
+        name=product.name,
+        price=product.price,
+        stock=product.stock,
+        image_url=product.image_url,
+        is_blocked=bool(getattr(product, "is_blocked", False)),
+    )
     db.add(db_product)
     db.commit()
     db.refresh(db_product)
@@ -136,6 +183,12 @@ def reduce_stock(product_id: int, payload: schemas.ProductReduceStock, db: Sessi
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    if getattr(product, "is_blocked", False):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Product '{product.name}' is currently blocked and cannot be purchased."
+        )
+
     if product.stock < payload.quantity:
         raise HTTPException(
             status_code=400,
@@ -143,6 +196,45 @@ def reduce_stock(product_id: int, payload: schemas.ProductReduceStock, db: Sessi
         )
 
     product.stock -= payload.quantity
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+# ==============================================================================
+# [DATA TRAVEL FLOW - BLOCK / UNBLOCK PRODUCT (1 or 0 in DB)]:
+# ==============================================================================
+@app.put("/products/{product_id}/block", response_model=schemas.Product)
+def block_product(product_id: int, db: Session = Depends(database.get_db)):
+    """Blocks a product from purchase (is_blocked = 1)."""
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    product.is_blocked = True
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+@app.put("/products/{product_id}/unblock", response_model=schemas.Product)
+def unblock_product(product_id: int, db: Session = Depends(database.get_db)):
+    """Unblocks a product (is_blocked = 0)."""
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    product.is_blocked = False
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+@app.put("/products/{product_id}/toggle-block", response_model=schemas.Product)
+def toggle_block_product(product_id: int, db: Session = Depends(database.get_db)):
+    """Toggles product blocked status between 0 (active) and 1 (blocked)."""
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    product.is_blocked = not bool(product.is_blocked)
     db.commit()
     db.refresh(product)
     return product

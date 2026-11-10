@@ -9,8 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "formik": "^2.4.9",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "yup": "^1.7.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.0.3",

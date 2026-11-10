@@ -1,6 +1,8 @@
 import os
 import json
+from datetime import datetime
 import httpx
+from typing import Optional
 from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -16,7 +18,8 @@ except ImportError:
 #
 # High-Level Data Travel Architecture:
 #   1. React Frontend (Browser Port 5173) connects exclusively to this Gateway.
-#   2. Local Auth Routes (/auth/*) validate credentials and issue JWT tokens.
+#   2. Local Auth Routes (/auth/login, /auth/register, /users/login, /users/register)
+#      validate credentials with bcrypt and issue secure signed JWT tokens.
 #   3. Catch-All Proxy (/{service_prefix}/*) validates JWT & RBAC, then forwards
 #      requests directly to downstream microservices (Ports 8011, 8012, 8013).
 #   4. Downstream responses are streamed back to the client.
@@ -44,97 +47,142 @@ SERVICE_URL_MAP = {
 PUBLIC_ROUTES = [
     ("POST", "/auth/login"),
     ("POST", "/auth/register"),
+    ("POST", "/users/login"),
+    ("POST", "/users/register"),
     ("GET", "/products"),
+    ("GET", "/orders/payment/config"),
 ]
 
 class LoginRequest(BaseModel):
     email: str
+    password: str
 
 class RegisterRequest(BaseModel):
     name: str
     email: str
+    password: str
     role: str = "customer"
+    profile_image: Optional[str] = None
 
 
 # ==============================================================================
 # [DATA TRAVEL FLOW - USER LOGIN]:
-#   Step 1: Frontend sends { email } -> POST http://127.0.0.1:8010/auth/login
-#   Step 2: Gateway forwards request -> GET http://127.0.0.1:8011/users/by-email?email=...
-#   Step 3: User Service checks MySQL (users_db.users) and returns user record
+#   Step 1: Frontend sends { email, password } -> POST /auth/login or /users/login
+#   Step 2: Gateway forwards request -> POST http://127.0.0.1:8011/users/verify-credentials
+#   Step 3: User Service checks MySQL (users_db.users) and verifies bcrypt password hash
 #   Step 4: Gateway generates signed JWT { user_id, email, role, exp }
 #   Step 5: Gateway returns { access_token, token_type, user } back to Frontend
 # ==============================================================================
 @app.post("/auth/login")
+@app.post("/users/login")
 async def login(payload: LoginRequest):
-    """Authenticates credentials against User Service and issues JWT."""
+    """Authenticates credentials against User Service (bcrypt) and issues JWT."""
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            # Step 2: Forward lookup to User Service
             user_host = SERVICE_URL_MAP["users"]
-            res = await client.get(f"{user_host}/users/by-email", params={"email": payload.email.strip()})
-            if res.status_code == 404:
-                raise HTTPException(status_code=401, detail="Email address not registered")
+            res = await client.post(
+                f"{user_host}/users/verify-credentials",
+                json={"email": payload.email.strip(), "password": payload.password}
+            )
+            if res.status_code == 401:
+                raise HTTPException(status_code=401, detail="Invalid email or password")
+            elif res.status_code == 403:
+                raise HTTPException(status_code=403, detail=res.json().get("detail", "Your account has been blocked."))
             elif res.status_code != 200:
-                raise HTTPException(status_code=500, detail="User Service database connection failed")
+                raise HTTPException(status_code=500, detail="User Service authentication failed")
 
-            # Step 4: Issue signed JWT access token
             user = res.json()
             user_role = user.get("role", "customer")
-            token = auth.create_access_token(data={"user_id": user["id"], "email": user["email"], "role": user_role})
+            token, expire = auth.create_access_token(
+                data={"user_id": user["id"], "email": user["email"], "role": user_role}
+            )
 
-            # Step 5: Return token and user profile to Frontend
-            return {"access_token": token, "token_type": "bearer", "user": user}
+            # Persist JWT token, expiration datetime, and last_login into MySQL users_db.users
+            now = datetime.now()
+            try:
+                await client.put(
+                    f"{user_host}/users/{user['id']}/token",
+                    json={
+                        "access_token": token,
+                        "token_expires_at": expire.strftime("%Y-%m-%d %H:%M:%S"),
+                        "last_login": now.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                )
+            except Exception as e:
+                print(f"Token persistence note: {e}")
+
+            return {
+                "access_token": token,
+                "token_type": "bearer",
+                "user": user,
+                "expires_in_minutes": auth.ACCESS_TOKEN_EXPIRE_MINUTES
+            }
         except httpx.RequestError:
             raise HTTPException(status_code=503, detail="User Service is offline")
 
 
 # ==============================================================================
 # [DATA TRAVEL FLOW - USER REGISTRATION]:
-#   Step 1: Frontend sends { name, email, role } -> POST http://127.0.0.1:8010/auth/register
+#   Step 1: Frontend sends { name, email, password, role } -> POST /auth/register or /users/register
 #   Step 2: Gateway forwards JSON -> POST http://127.0.0.1:8011/users/
-#   Step 3: User Service inserts record into MySQL (users_db.users) and returns created user with ID
+#   Step 3: User Service bcrypt-hashes password, inserts record into MySQL (users_db.users)
 #   Step 4: Gateway signs new JWT containing { user_id, email, role, exp }
 #   Step 5: Gateway returns { access_token, token_type, user } back to Frontend
 # ==============================================================================
 @app.post("/auth/register")
+@app.post("/users/register")
 async def register(payload: RegisterRequest):
-    """Registers user in User Service and issues JWT access token."""
+    """Registers new user in User Service, hashes password, and issues JWT."""
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            # Step 2: Forward registration payload to User Service
             user_host = SERVICE_URL_MAP["users"]
-            res = await client.post(f"{user_host}/users/", json=payload.dict())
+            res = await client.post(
+                f"{user_host}/users",
+                json={
+                    "name": payload.name.strip(),
+                    "email": payload.email.strip(),
+                    "password": payload.password.strip(),
+                    "role": payload.role,
+                    "profile_image": payload.profile_image.strip() if payload.profile_image else None,
+                }
+            )
             if res.status_code == 400:
-                raise HTTPException(status_code=400, detail="Email already registered")
+                raise HTTPException(status_code=400, detail=res.json().get("detail", "Email already registered"))
             elif res.status_code != 201:
-                raise HTTPException(status_code=500, detail="User registration failed")
+                raise HTTPException(status_code=500, detail="User Service registration failed")
 
-            # Step 4: Issue signed JWT token for the newly created user
             user = res.json()
             user_role = user.get("role", "customer")
-            token = auth.create_access_token(data={"user_id": user["id"], "email": user["email"], "role": user_role})
+            token, expire = auth.create_access_token(
+                data={"user_id": user["id"], "email": user["email"], "role": user_role}
+            )
 
-            # Step 5: Return token and user profile to Frontend
-            return {"access_token": token, "token_type": "bearer", "user": user}
+            # Persist JWT token, expiration datetime, and last_login into MySQL users_db.users
+            now = datetime.now()
+            try:
+                await client.put(
+                    f"{user_host}/users/{user['id']}/token",
+                    json={
+                        "access_token": token,
+                        "token_expires_at": expire.strftime("%Y-%m-%d %H:%M:%S"),
+                        "last_login": now.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                )
+            except Exception as e:
+                print(f"Token persistence note: {e}")
+
+            return {
+                "access_token": token,
+                "token_type": "bearer",
+                "user": user,
+                "expires_in_minutes": auth.ACCESS_TOKEN_EXPIRE_MINUTES
+            }
         except httpx.RequestError:
             raise HTTPException(status_code=503, detail="User Service is offline")
 
 
 # ==============================================================================
-# [DATA TRAVEL FLOW - DYNAMIC REVERSE PROXY]:
-#   Step 1: Frontend sends request -> http://127.0.0.1:8010/{service_prefix}/{path}
-#   Step 2: Gateway verifies route against PUBLIC_ROUTES whitelist.
-#           - If protected: validates Authorization: Bearer <token> & decodes JWT.
-#   Step 3: Gateway enforces RBAC rules:
-#           - Products: Only Admin can POST, PUT, DELETE.
-#           - Orders POST: Injects authenticated user_id from token into body.
-#           - Orders GET: Scopes customer view to their own user_id.
-#           - Users/Orders PUT/DELETE: Prevents users from modifying other accounts.
-#   Step 4: Gateway forwards request downstream using HTTPX:
-#           - /users/*    -> http://127.0.0.1:8011/users/*
-#           - /products/* -> http://127.0.0.1:8012/products/*
-#           - /orders/*   -> http://127.0.0.1:8013/orders/*
-#   Step 5: Target microservice responds; Gateway relays exact status & body to Frontend.
+# DYNAMIC REVERSE PROXY WITH JWT & RBAC VERIFICATION
 # ==============================================================================
 @app.api_route("/{service_prefix}", methods=["GET", "POST", "PUT", "DELETE"])
 @app.api_route("/{service_prefix}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
@@ -158,7 +206,7 @@ async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str
 
     # Check if request is on the public whitelist
     is_public_route = any(
-        method == m and request_path.startswith(p)
+        method == m and (request_path == p or request_path.startswith(f"{p}/"))
         for m, p in PUBLIC_ROUTES
     )
 
@@ -182,6 +230,22 @@ async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Access denied: Admin role required to create, modify, or delete products"
+                )
+
+        # RBAC: Only Admin can block or unblock users
+        if service_prefix == "users" and any(act in path for act in ("block", "unblock", "toggle-block")):
+            if user_role != "admin":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: Admin role required to block or unblock users"
+                )
+
+        # RBAC: Only Admin can block or unblock products
+        if service_prefix == "products" and any(act in path for act in ("block", "unblock", "toggle-block")):
+            if user_role != "admin":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: Admin role required to block or unblock products"
                 )
 
         # Ingestion Security: Inject authenticated user_id into order body to prevent spoofing
@@ -227,7 +291,7 @@ async def dynamic_reverse_proxy(service_prefix: str, request: Request, path: str
                         except httpx.RequestError:
                             pass
 
-    # Step 4 & 5: Forward request downstream and relay response back to client
+    # Forward request downstream and relay response back to client
     async with httpx.AsyncClient(timeout=15.0) as client:
         try:
             response = await client.request(

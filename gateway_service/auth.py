@@ -11,12 +11,13 @@ SECRET_KEY = os.getenv("JWT_SECRET", "demo_secret_key_Demo_gatekeeper_auth_2026"
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """Generates a secure signed JWT token containing user identity details."""
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    """Generates a secure signed JWT token containing user identity details and returns (token, expire)."""
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode["exp"] = expire
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return token, expire
 
 def decode_access_token(token: str) -> Optional[dict]:
     """Decodes and validates a JWT token. Returns payload if valid, None if expired/corrupted."""

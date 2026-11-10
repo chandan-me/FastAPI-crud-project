@@ -14,3 +14,6 @@ class Order(Base):
     quantity = Column(Integer, nullable=False)
     total_price = Column(Float, nullable=False)
     status = Column(String(50), default="PENDING")
+    payment_method = Column(String(50), default="COD")
+    payment_id = Column(String(100), nullable=True)
+    order_group_id = Column(String(100), nullable=True, index=True)

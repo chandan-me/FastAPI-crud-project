@@ -1,13 +1,25 @@
 import os
+import time
 import httpx
 from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from dotenv import load_dotenv
+
+# Load root .env
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
 
 try:
     from . import models, schemas, database
 except ImportError:
     import models, schemas, database
+
+def get_razorpay_keys():
+    """Dynamically reads RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET from .env with override."""
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"), override=True)
+    key_id = os.getenv("RAZORPAY_KEY_ID", "").strip()
+    key_secret = os.getenv("RAZORPAY_KEY_SECRET", "").strip()
+    return key_id, key_secret
 
 # ==============================================================================
 # ORDER SERVICE (Port 8013)
@@ -71,6 +83,9 @@ async def create_order(order: schemas.OrderCreate, db: Session = Depends(databas
                 raise HTTPException(status_code=400, detail=f"User with ID {order.user_id} not found.")
             elif user_res.status_code != 200:
                 raise HTTPException(status_code=500, detail="Failed to verify user from User Service.")
+            user_data = user_res.json()
+            if user_data.get("is_blocked"):
+                raise HTTPException(status_code=403, detail="Your user account is blocked and cannot place orders.")
         except httpx.RequestError:
             raise HTTPException(status_code=503, detail="User Service is unavailable.")
 
@@ -85,6 +100,11 @@ async def create_order(order: schemas.OrderCreate, db: Session = Depends(databas
             raise HTTPException(status_code=503, detail="Product Service is unavailable.")
 
         product_data = prod_res.json()
+        if product_data.get("is_blocked"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Product '{product_data.get('name')}' is blocked and cannot be purchased."
+            )
 
         # Step 3: Assert sufficient stock availability
         if product_data["stock"] < order.quantity:
@@ -111,12 +131,203 @@ async def create_order(order: schemas.OrderCreate, db: Session = Depends(databas
             product_id=order.product_id,
             quantity=order.quantity,
             total_price=total_price,
-            status="COMPLETED"
+            status="COMPLETED",
+            payment_method=order.payment_method or "COD",
+            payment_id=order.payment_id,
+            order_group_id=order.order_group_id
         )
         db.add(db_order)
         db.commit()
         db.refresh(db_order)
+        if not db_order.order_group_id:
+            db_order.order_group_id = f"ORD-{db_order.id}"
+            db.commit()
+            db.refresh(db_order)
         return db_order
+
+
+# ==============================================================================
+# [DATA TRAVEL FLOW - PAYMENT & BATCH CHECKOUT ROUTES]:
+#   - GET /orders/payment/config -> returns Razorpay public key and configuration
+#   - POST /orders/payment/razorpay/create-order -> creates official Razorpay Order
+#   - POST /orders/payment/razorpay/verify -> verifies signature & confirms orders
+#   - POST /orders/checkout -> multi-item batch order placement (COD or prepaid)
+# ==============================================================================
+
+@app.get("/orders/payment/config")
+def get_payment_config():
+    """Returns Razorpay public key and configuration state from .env."""
+    key_id, key_secret = get_razorpay_keys()
+    return {
+        "razorpay_key_id": key_id,
+        "is_configured": bool(key_id and key_secret),
+        "currency": "INR"
+    }
+
+
+@app.post("/orders/payment/razorpay/create-order")
+def create_razorpay_order(payload: schemas.RazorpayCreateOrderRequest):
+    """Creates an official Razorpay Order for frontend checkout."""
+    key_id, key_secret = get_razorpay_keys()
+    if not key_id or not key_secret:
+        raise HTTPException(
+            status_code=400,
+            detail="Razorpay is not configured in .env. Please add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET."
+        )
+
+    try:
+        import razorpay
+        client = razorpay.Client(auth=(key_id, key_secret))
+        amount_in_paise = int(round(payload.amount * 100))
+        receipt_id = f"rcpt_{int(time.time() * 1000)}"
+        rzp_order = client.order.create({
+            "amount": amount_in_paise,
+            "currency": payload.currency or "INR",
+            "receipt": receipt_id,
+            "payment_capture": 1
+        })
+        return {
+            "razorpay_order_id": rzp_order["id"],
+            "amount": rzp_order["amount"],
+            "currency": rzp_order["currency"],
+            "key_id": key_id
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to create Razorpay order: {str(e)}")
+
+
+@app.post("/orders/payment/razorpay/verify", response_model=List[schemas.Order])
+async def verify_razorpay_and_place_orders(payload: schemas.RazorpayVerifyRequest, db: Session = Depends(database.get_db)):
+    """Verifies Razorpay HMAC signature and places all cart orders atomically."""
+    key_id, key_secret = get_razorpay_keys()
+    if not key_id or not key_secret:
+        raise HTTPException(
+            status_code=400,
+            detail="Razorpay is not configured in .env. Please add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET."
+        )
+
+    try:
+        import razorpay
+        client = razorpay.Client(auth=(key_id, key_secret))
+        client.utility.verify_payment_signature({
+            "razorpay_order_id": payload.razorpay_order_id,
+            "razorpay_payment_id": payload.razorpay_payment_id,
+            "razorpay_signature": payload.razorpay_signature
+        })
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid Razorpay payment signature: {str(e)}")
+
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="No items specified for checkout.")
+
+    group_id = payload.razorpay_payment_id or f"RZP-{int(time.time()*1000)}"
+    created_orders = []
+    async with httpx.AsyncClient(timeout=10.0) as client_http:
+        for item in payload.items:
+            prod_res = await client_http.get(f"{PRODUCT_SERVICE_URL}/products/{item.product_id}")
+            if prod_res.status_code != 200:
+                continue
+            prod_data = prod_res.json()
+
+            deduct_res = await client_http.put(
+                f"{PRODUCT_SERVICE_URL}/products/{item.product_id}/reduce-stock",
+                json={"quantity": item.quantity}
+            )
+            if deduct_res.status_code != 200:
+                continue
+
+            total_price = prod_data["price"] * item.quantity
+            db_order = models.Order(
+                user_id=payload.user_id,
+                product_id=item.product_id,
+                quantity=item.quantity,
+                total_price=total_price,
+                status="COMPLETED",
+                payment_method="RAZORPAY",
+                payment_id=payload.razorpay_payment_id,
+                order_group_id=group_id
+            )
+            db.add(db_order)
+            db.commit()
+            db.refresh(db_order)
+            created_orders.append(db_order)
+
+    return created_orders
+
+
+@app.post("/orders/checkout", response_model=List[schemas.Order], status_code=status.HTTP_201_CREATED)
+async def checkout_cart_orders(payload: schemas.CheckoutRequest, db: Session = Depends(database.get_db)):
+    """Batch order placement for cart checkout (Cash on Delivery or prepaid)."""
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="Cart has no items for checkout.")
+
+    group_id = payload.payment_id or f"COD-{int(time.time()*1000)}-{payload.user_id}"
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        # Step 1: Verify user
+        try:
+            user_res = await client.get(f"{USER_SERVICE_URL}/users/{payload.user_id}")
+            if user_res.status_code == 404:
+                raise HTTPException(status_code=400, detail=f"User with ID {payload.user_id} not found.")
+            elif user_res.status_code != 200:
+                raise HTTPException(status_code=500, detail="Failed to verify user from User Service.")
+            if user_res.json().get("is_blocked"):
+                raise HTTPException(status_code=403, detail="Your user account is blocked and cannot place orders.")
+        except httpx.RequestError:
+            raise HTTPException(status_code=503, detail="User Service is unavailable.")
+
+        # Step 2: Validate all products & verify stocks
+        product_cache = {}
+        for item in payload.items:
+            try:
+                prod_res = await client.get(f"{PRODUCT_SERVICE_URL}/products/{item.product_id}")
+                if prod_res.status_code == 404:
+                    raise HTTPException(status_code=400, detail=f"Product with ID {item.product_id} not found.")
+                elif prod_res.status_code != 200:
+                    raise HTTPException(status_code=500, detail="Failed to verify product.")
+                pdata = prod_res.json()
+                if pdata.get("is_blocked"):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Product '{pdata['name']}' is currently blocked and cannot be purchased."
+                    )
+                if pdata["stock"] < item.quantity:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Insufficient stock for '{pdata['name']}'. Available: {pdata['stock']}, Requested: {item.quantity}"
+                    )
+                product_cache[item.product_id] = pdata
+            except httpx.RequestError:
+                raise HTTPException(status_code=503, detail="Product Service is unavailable.")
+
+        # Step 3: Deduct stock and commit orders
+        created_orders = []
+        for item in payload.items:
+            pdata = product_cache[item.product_id]
+            deduct_res = await client.put(
+                f"{PRODUCT_SERVICE_URL}/products/{item.product_id}/reduce-stock",
+                json={"quantity": item.quantity}
+            )
+            if deduct_res.status_code != 200:
+                raise HTTPException(status_code=500, detail=f"Failed to deduct stock for {pdata['name']}")
+
+            total_price = pdata["price"] * item.quantity
+            db_order = models.Order(
+                user_id=payload.user_id,
+                product_id=item.product_id,
+                quantity=item.quantity,
+                total_price=total_price,
+                status="COMPLETED",
+                payment_method=payload.payment_method or "COD",
+                payment_id=payload.payment_id,
+                order_group_id=group_id
+            )
+            db.add(db_order)
+            db.commit()
+            db.refresh(db_order)
+            created_orders.append(db_order)
+
+        return created_orders
 
 
 # ==============================================================================
@@ -207,6 +418,9 @@ async def get_order_details(order_id: int, db: Session = Depends(database.get_db
         "quantity": order.quantity,
         "total_price": order.total_price,
         "status": order.status,
+        "payment_method": order.payment_method or "COD",
+        "payment_id": order.payment_id,
+        "order_group_id": order.order_group_id,
         "user_details": user_details,
         "product_details": product_details
     }

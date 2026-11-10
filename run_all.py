@@ -43,7 +43,7 @@ def main():
         # 1. Start User Service (Port 8011)
         print("[System] Launching User Service on http://127.0.0.1:8011 ...")
         user_proc = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "user_service.main:app", "--port", "8011"],
+            [sys.executable, "-m", "uvicorn", "user_service.main:app", "--port", "8011", "--reload"],
             stdout=user_log,
             stderr=subprocess.STDOUT
         )
@@ -52,7 +52,7 @@ def main():
         # 2. Start Product Service (Port 8012)
         print("[System] Launching Product Service on http://127.0.0.1:8012 ...")
         product_proc = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "product_service.main:app", "--port", "8012"],
+            [sys.executable, "-m", "uvicorn", "product_service.main:app", "--port", "8012", "--reload"],
             stdout=product_log,
             stderr=subprocess.STDOUT
         )
@@ -61,7 +61,7 @@ def main():
         # 3. Start Order Service (Port 8013)
         print("[System] Launching Order Service on http://127.0.0.1:8013 ...")
         order_proc = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "order_service.main:app", "--port", "8013"],
+            [sys.executable, "-m", "uvicorn", "order_service.main:app", "--port", "8013", "--reload"],
             stdout=order_log,
             stderr=subprocess.STDOUT
         )
@@ -70,7 +70,7 @@ def main():
         # 4. Start API Gateway (Port 8010)
         print("[System] Launching API Gateway on http://127.0.0.1:8010 ...")
         gateway_proc = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "gateway_service.main:app", "--port", "8010"],
+            [sys.executable, "-m", "uvicorn", "gateway_service.main:app", "--port", "8010", "--reload"],
             stdout=gateway_log,
             stderr=subprocess.STDOUT
         )

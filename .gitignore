@@ -90,3 +90,13 @@ pnpm-debug.log*
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# --- Microsoft Office Temp & Lock Files ---
+~$*
+~$*.docx
+~$*.xlsx
+~$*.pptx
+
+# --- Bundler / Vite Cache ---
+.vite/
+frontend/.vite/
